@@ -16,6 +16,6 @@ includedir = $(prefix)/include
 install:
 	mkdir -p $(DESTDIR)/$(includedir)/linux
 	cp include/linux/serialsim.h $(DESTDIR)/$(includedir)/linux
-	mkdir $(my_moddir)/local
+	mkdir -p $(my_moddir)/local
 	cp serialsim.ko $(my_moddir)/local
 	depmod -a
