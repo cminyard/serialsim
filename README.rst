@@ -102,24 +102,28 @@ set through the serial port interface itself.
 
 So, for instance, ttyEcho0 comes up in the following state:
 
- # cat /sys/class/tty/ttyEcho0/ctrl
- ttyEcho0: +nullmodem -cd -dsr -cts -ring -dtr -rts
+::
+   # cat /sys/class/tty/ttyEcho0/ctrl
+   ttyEcho0: +nullmodem -cd -dsr -cts -ring -dtr -rts
 
 If something connects, it will become:
 
- ttyEcho0: +nullmodem +cd +dsr +cts -ring +dtr +rts
+::
+   ttyEcho0: +nullmodem +cd +dsr +cts -ring +dtr +rts
 
 To enable ring:
 
- # echo "+ring" >/sys/class/tty/ttyEcho0/ctrl
- # cat /sys/class/tty/ttyEcho0/ctrl
- ttyEcho0: +nullmodem +cd +dsr +cts +ring +dtr +rts
+::
+   # echo "+ring" >/sys/class/tty/ttyEcho0/ctrl
+   # cat /sys/class/tty/ttyEcho0/ctrl
+   ttyEcho0: +nullmodem +cd +dsr +cts +ring +dtr +rts
 
 Now disable NULL modem and the CD line:
 
- # echo "-nullmodem -cd" >/sys/class/tty/ttyEcho0/ctrl
- # cat /sys/class/tty/ttyEcho0/ctrl
- ttyEcho0: -nullmodem -cd -dsr -cts +ring -dtr -rts
+::
+   # echo "-nullmodem -cd" >/sys/class/tty/ttyEcho0/ctrl
+   # cat /sys/class/tty/ttyEcho0/ctrl
+   ttyEcho0: -nullmodem -cd -dsr -cts +ring -dtr -rts
 
 Note that these settings are for the side you are modifying.  So if
 you set nullmodem on ttyPipeA0, that controls whether the DTR/RTS
@@ -160,52 +164,63 @@ The python interface is a straight conversion of the C interface into
 python.  It is in the serialsim python module and has the following
 interfaces:
 
-  termios = get_remote_termios(fd)
+::
+   termios = get_remote_termios(fd)
 
 The termios are the standard python termios.
 
-  rs485 = get_remote_rs485(fd)
+::
+   rs485 = get_remote_rs485(fd)
 
 rs485 is a string representation of the rs485 paramters, in the form:
 
-  "<delay_rts_before_send> <delay_rts_after_send> [<option> []]"
+::
+   "<delay_rts_before_send> <delay_rts_after_send> [<option> []]"
 
 The two given values are integers, options are:
 
-  enabled
-  rts_on_send
-  rts_after_send
-  rx_during_tx
-  terminate_bus
+::
+   enabled
+   rts_on_send
+   rts_after_send
+   rx_during_tx
+   terminate_bus
 
 You will need to review RS485 documentation for details.
 
-  set_remote_modem_ctl(fd, val)
-  val = get_remote_modem_ctl(fd);
+::
+   set_remote_modem_ctl(fd, val)
+   val = get_remote_modem_ctl(fd);
 
 Get set the modem control lines.  The value is a bitmask of:
 
-  SERIALSIM_TIOCM_CAR
-  SERIALSIM_TIOCM_CTS
-  SERIALSIM_TIOCM_DSR
-  SERIALSIM_TIOCM_RNG
-  SERIALSIM_TIOCM_DTR
-  SERIALSIM_TIOCM_RTS
+::
+   SERIALSIM_TIOCM_CAR
+   SERIALSIM_TIOCM_CTS
+   SERIALSIM_TIOCM_DSR
+   SERIALSIM_TIOCM_RNG
+   SERIALSIM_TIOCM_DTR
+   SERIALSIM_TIOCM_RTS
 
 You cannot set DTR or RTS, they are outputs from the other side.
 
-  set_remote_serial_err(fd, val)
-  val = get_remote_serial_err(fd);
+::
+   set_remote_serial_err(fd, val)
+   val = get_remote_serial_err(fd);
 
-You can inject serial errors or see if a serial error happened on the
-other end.  The value is a bitmask of:
+You can inject serial errors on the other end.  The value is a bitmask
+of:
 
-  SERIALSIM_TTY_BREAK
-  SERIALSIM_TTY_FRAME
-  SERIALSIM_TTY_PARITY
-  SERIALSIM_TTY_OVERRUN
+::
+   SERIALSIM_TTY_BREAK
+   SERIALSIM_TTY_FRAME
+   SERIALSIM_TTY_PARITY
+   SERIALSIM_TTY_OVERRUN
 
-  set_remote_null_modem(fd, bool_val)
-  bool_val = get_remote_null_modem(fd);
+Hopefully the meanings of these are obvious.
+
+::
+   set_remote_null_modem(fd, bool_val)
+   bool_val = get_remote_null_modem(fd);
 
 The null modem setting for the remote serial port.
