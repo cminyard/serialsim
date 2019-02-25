@@ -103,17 +103,20 @@ set through the serial port interface itself.
 So, for instance, ttyEcho0 comes up in the following state:
 
 ::
+
    # cat /sys/class/tty/ttyEcho0/ctrl
    ttyEcho0: +nullmodem -cd -dsr -cts -ring -dtr -rts
 
 If something connects, it will become:
 
 ::
+
    ttyEcho0: +nullmodem +cd +dsr +cts -ring +dtr +rts
 
 To enable ring:
 
 ::
+
    # echo "+ring" >/sys/class/tty/ttyEcho0/ctrl
    # cat /sys/class/tty/ttyEcho0/ctrl
    ttyEcho0: +nullmodem +cd +dsr +cts +ring +dtr +rts
@@ -121,6 +124,7 @@ To enable ring:
 Now disable NULL modem and the CD line:
 
 ::
+
    # echo "-nullmodem -cd" >/sys/class/tty/ttyEcho0/ctrl
    # cat /sys/class/tty/ttyEcho0/ctrl
    ttyEcho0: -nullmodem -cd -dsr -cts +ring -dtr -rts
@@ -165,21 +169,25 @@ python.  It is in the serialsim python module and has the following
 interfaces:
 
 ::
+
    termios = get_remote_termios(fd)
 
 The termios are the standard python termios.
 
 ::
+
    rs485 = get_remote_rs485(fd)
 
 rs485 is a string representation of the rs485 paramters, in the form:
 
 ::
+
    "<delay_rts_before_send> <delay_rts_after_send> [<option> []]"
 
 The two given values are integers, options are:
 
 ::
+
    enabled
    rts_on_send
    rts_after_send
@@ -189,12 +197,14 @@ The two given values are integers, options are:
 You will need to review RS485 documentation for details.
 
 ::
+
    set_remote_modem_ctl(fd, val)
    val = get_remote_modem_ctl(fd);
 
 Get set the modem control lines.  The value is a bitmask of:
 
 ::
+
    SERIALSIM_TIOCM_CAR
    SERIALSIM_TIOCM_CTS
    SERIALSIM_TIOCM_DSR
@@ -205,6 +215,7 @@ Get set the modem control lines.  The value is a bitmask of:
 You cannot set DTR or RTS, they are outputs from the other side.
 
 ::
+
    set_remote_serial_err(fd, val)
    val = get_remote_serial_err(fd);
 
@@ -212,6 +223,7 @@ You can inject serial errors on the other end.  The value is a bitmask
 of:
 
 ::
+
    SERIALSIM_TTY_BREAK
    SERIALSIM_TTY_FRAME
    SERIALSIM_TTY_PARITY
@@ -220,6 +232,7 @@ of:
 Hopefully the meanings of these are obvious.
 
 ::
+
    set_remote_null_modem(fd, bool_val)
    bool_val = get_remote_null_modem(fd);
 
