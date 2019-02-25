@@ -23,7 +23,7 @@
 #include <linux/ctype.h>
 #include <linux/string.h>
 
-#include "serialsim.h"
+#include <linux/serialsim.h>
 
 #define PORT_SERIALECHO 72549
 #define PORT_SERIALPIPEA 72550
