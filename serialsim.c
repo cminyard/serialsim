@@ -595,7 +595,8 @@ static int serialpipe_ioctl(struct uart_port *port, unsigned int cmd,
 
 	case TIOCSERGREMNULLMODEM:
 		val = intf->ointf->do_null_modem;
-		copy_to_user((int __user *) arg, &val, sizeof(int));
+		if (copy_to_user((int __user *) arg, &val, sizeof(int)))
+			rv = -EFAULT;
 		break;
 
 	case TIOCSERSREMMCTRL:
@@ -608,8 +609,10 @@ static int serialpipe_ioctl(struct uart_port *port, unsigned int cmd,
 		break;
 
 	case TIOCSERGREMMCTRL:
-		copy_to_user((unsigned int __user *) arg, &intf->ointf->mctrl,
-			     sizeof(unsigned int));
+		if (copy_to_user((unsigned int __user *) arg,
+				 &intf->ointf->mctrl,
+				 sizeof(unsigned int)))
+			rv = -EFAULT;
 		break;
 
 	case TIOCSERSREMERR:
@@ -620,8 +623,9 @@ static int serialpipe_ioctl(struct uart_port *port, unsigned int cmd,
 		break;
 
 	case TIOCSERGREMERR:
-		copy_to_user((unsigned int __user *) arg, &intf->flags,
-			     sizeof(unsigned int));
+		if (copy_to_user((unsigned int __user *) arg, &intf->flags,
+				 sizeof(unsigned int)))
+			rv = -EFAULT;
 		break;
 
 	case TIOCSERGREMTERMIOS:
@@ -642,8 +646,6 @@ static int serialpipe_ioctl(struct uart_port *port, unsigned int cmd,
 #endif
 		if (rv)
 			rv = -EFAULT;
-		else
-			rv = 0;
 		break;
 	}
 
