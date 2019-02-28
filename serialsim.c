@@ -114,7 +114,8 @@ static unsigned int serialsim_tx_empty(struct uart_port *port)
  * We have to lock multiple locks, make sure to do it in the same order all
  * the time.
  */
-static void serialsim_null_modem_lock_irq(struct serialsim_intf *intf) {
+static void serialsim_null_modem_lock_irq(struct serialsim_intf *intf)
+{
 	spin_lock_irq(&intf->port.lock);
 	if (intf == intf->ointf) {
 		spin_lock(&intf->mctrl_lock);
@@ -283,10 +284,18 @@ static void serialsim_set_baud_rate(struct serialsim_intf *intf,
 	unsigned int bits_per_char;
 
 	switch (cflag & CSIZE) {
-	case CS5: bits_per_char = 7; break;
-	case CS6: bits_per_char = 8; break;
-	case CS7: bits_per_char = 9; break;
-	default:  bits_per_char = 10; break; /* CS8 and others. */
+	case CS5:
+		bits_per_char = 7;
+		break;
+	case CS6:
+		bits_per_char = 8;
+		break;
+	case CS7:
+		bits_per_char = 9;
+		break;
+	default:
+		bits_per_char = 10;
+		break; /* CS8 and others. */
 	}
 	if (cflag & CSTOPB)
 		bits_per_char++;
@@ -519,7 +528,7 @@ static void serialsim_release_port(struct uart_port *port)
 
 static void
 serialsim_set_termios(struct uart_port *port, struct ktermios *termios,
-	        struct ktermios *old)
+		      struct ktermios *old)
 {
 	struct serialsim_intf *intf = serialsim_port_to_intf(port);
 	unsigned int baud = uart_get_baud_rate(port, termios, old,
@@ -809,8 +818,7 @@ out:
 	return rv;
 }
 
-static DEVICE_ATTR(ctrl, S_IWUSR |S_IRUSR | S_IWGRP | S_IRGRP,
-		   serialsim_ctrl_read, serialsim_ctrl_write);
+static DEVICE_ATTR(ctrl, 0660, serialsim_ctrl_read, serialsim_ctrl_write);
 
 static struct attribute *serialsim_dev_attrs[] = {
 	&dev_attr_ctrl.attr,
@@ -1071,5 +1079,5 @@ module_init(serialsim_init);
 module_exit(serialsim_exit);
 
 MODULE_AUTHOR("Corey Minyard");
-MODULE_DESCRIPTION("Serial echo device");
+MODULE_DESCRIPTION("Serial simulation device");
 MODULE_LICENSE("GPL");

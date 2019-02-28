@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0+
+/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
 
 /*
  * serialsim - Emulate a serial device in a loopback and/or pipe
@@ -6,7 +6,8 @@
 
 /*
  * TTY IOCTLs for controlling the modem control and for error injection.
- * See serialsim.c for details.
+ * See drivers/tty/serial/serialsim.c and Documentation/serial/serialsim.rst
+ * for details.
  */
 
 #ifndef LINUX_SERIALSIM_H

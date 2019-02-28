@@ -1,6 +1,6 @@
-===========================
+=====================================
 serialsim - A kernel serial simualtor
-===========================
+=====================================
 
 :Author: Corey Minyard <minyard@mvista.com> / <minyard@acm.org>
 
@@ -15,9 +15,9 @@ There is a python interface to the special ioctls for controlling the
 remote end of the termios.  It is in the swig directory and is a
 standard autoconf build.
 
-===============
+========
 Building
-===============
+========
 "make" should build the module serialsim.ko, which can be loaded
 onto your system with insmod.  You can do "sudo make install" which
 will install serialsim.ko in /lib/modules/<kernver>/local and
@@ -28,9 +28,9 @@ To build the python modules, cd to "swig" and run:
 ./configure
 make
 
-=======================
+=====
 Using
-=======================
+=====
 
 The serialsim.ko module creates two types of devices.  Echo devices
 simply echo back the data to the same device.  These devices will
