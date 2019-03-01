@@ -49,7 +49,11 @@ struct user_termios {
 int remote_termios(struct termios *itermios, int fd)
 {
     struct user_termios *termios = (struct user_termios *) itermios;
+#ifdef TCGETS2
     struct termios2 ktermios;
+#else
+    struct termios ktermios;
+#endif
     int rv = ioctl(fd, TIOCSERGREMTERMIOS, &ktermios);
     int i;
 
