@@ -22,6 +22,7 @@
 #include <linux/spinlock.h>
 #include <linux/ctype.h>
 #include <linux/string.h>
+#include <linux/uaccess.h>
 
 #include <linux/serialsim.h>
 
@@ -115,6 +116,8 @@ static unsigned int serialsim_tx_empty(struct uart_port *port)
  * the time.
  */
 static void serialsim_null_modem_lock_irq(struct serialsim_intf *intf)
+	__acquires(intf->port.lock) __acquires(intf->mctrl_lock)
+	__acquires(intf->ointf->mctrl_lock)
 {
 	spin_lock_irq(&intf->port.lock);
 	if (intf == intf->ointf) {
@@ -129,6 +132,8 @@ static void serialsim_null_modem_lock_irq(struct serialsim_intf *intf)
 }
 
 static void serialsim_null_modem_unlock_irq(struct serialsim_intf *intf)
+	__releases(intf->port.lock) __releases(intf->mctrl_lock)
+	__releases(intf->ointf->mctrl_lock)
 {
 	if (intf == intf->ointf) {
 		spin_unlock(&intf->mctrl_lock);
@@ -991,8 +996,6 @@ static int __init serialsim_init(void)
 		intfb->ointf = intfa;
 		intfa->threadname = "serialpipea";
 		intfb->threadname = "serialpipeb";
-		intfa->do_null_modem = true;
-		intfb->do_null_modem = true;
 		spin_lock_init(&intfa->mctrl_lock);
 		spin_lock_init(&intfb->mctrl_lock);
 		tasklet_init(&intfa->mctrl_tasklet, mctrl_tasklet,
@@ -1008,15 +1011,13 @@ static int __init serialsim_init(void)
 		spin_lock_init(&porta->lock);
 		porta->attr_group = &serialsim_dev_attr_group;
 		porta->rs485_config = serialsim_rs485;
-		rv = uart_add_one_port(&serialpipea_driver, porta);
-		if (rv) {
-			pr_err("serialsim: Unable to add uart pipe aport %d: %d\n",
-			       i, rv);
-			continue;
-		} else {
-			intfa->registered = true;
-		}
 
+		/*
+		 * uart_add_one_port() does an mctrl operation, which will
+		 * claim the other port's lock.  So everything needs to be
+		 * full initialized, and we need null modem off until we
+		 * get things added.
+		 */
 		portb->iobase = 1;
 		portb->line = i / 2;
 		portb->flags = UPF_BOOT_AUTOCONF;
@@ -1024,6 +1025,16 @@ static int __init serialsim_init(void)
 		portb->attr_group = &serialsim_dev_attr_group;
 		spin_lock_init(&portb->lock);
 		portb->rs485_config = serialsim_rs485;
+
+		rv = uart_add_one_port(&serialpipea_driver, porta);
+		if (rv) {
+			pr_err("serialsim: Unable to add uart pipe a port %d: %d\n",
+			       i, rv);
+			continue;
+		} else {
+			intfa->registered = true;
+		}
+
 		rv = uart_add_one_port(&serialpipeb_driver, portb);
 		if (rv) {
 			pr_err("serialsim: Unable to add uart pipe b port %d: %d\n",
@@ -1032,6 +1043,11 @@ static int __init serialsim_init(void)
 			uart_remove_one_port(&serialpipea_driver, porta);
 		} else {
 			intfb->registered = true;
+		}
+
+		if (intfa->registered && intfb->registered) {
+			serialsim_set_null_modem(intfa, true);
+			serialsim_set_null_modem(intfb, true);
 		}
 	}
 	rv = 0;
