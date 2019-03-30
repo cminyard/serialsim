@@ -3,8 +3,9 @@
 /*
  * serialsim - Emulate a serial device in a loopback and/or pipe
  *
- * See the docs for this for more details.
+ * See the Documentation/serial/serialsim.rts for more details.
  *
+ * Copyright 2019, Corey Minyard <minyard@acm.org>
  */
 
 #include <linux/module.h>
@@ -26,9 +27,12 @@
 
 #include <linux/serialsim.h>
 
-#define PORT_SERIALECHO 72549
-#define PORT_SERIALPIPEA 72550
-#define PORT_SERIALPIPEB 72551
+/*
+ * Port types for the various interfaces.
+ */
+#define PORT_SERIALECHO		72549
+#define PORT_SERIALPIPEA	72550
+#define PORT_SERIALPIPEB	72551
 
 #ifdef CONFIG_HIGH_RES_TIMERS
 #define SERIALSIM_WAKES_PER_SEC	1000
@@ -737,11 +741,7 @@ static ssize_t serialsim_ctrl_read(struct device *dev,
 	unsigned int mctrl = intf->mctrl;
 	char *val = buf;
 	int left = PAGE_SIZE;
-	int count;
 
-	count = snprintf(val, left, "%s:", dev->kobj.name);
-	val += count;
-	left -= count;
 	serialsim_ctrl_append(&val, &left, "nullmodem", intf->do_null_modem);
 	serialsim_ctrl_append(&val, &left, "cd", mctrl & TIOCM_CAR);
 	serialsim_ctrl_append(&val, &left, "dsr", mctrl & TIOCM_DSR);
@@ -832,6 +832,10 @@ static struct attribute *serialsim_dev_attrs[] = {
 	NULL,
 };
 
+/*
+ * We pass this into the uart_port and it does the register.  It's
+ * not const in uart_port, so we can't make it const here.
+ */
 static struct attribute_group serialsim_dev_attr_group = {
 	.attrs = serialsim_dev_attrs,
 };
@@ -914,8 +918,7 @@ static int __init serialsim_init(void)
 				   sizeof(*serialecho_ports),
 				   GFP_KERNEL);
 	if (!serialecho_ports) {
-		pr_err("serialsim: Unable to allocate echo ports.\n");
-		rv = ENOMEM;
+		rv = -ENOMEM;
 		goto out;
 	}
 
@@ -923,40 +926,29 @@ static int __init serialsim_init(void)
 				   sizeof(*serialpipe_ports),
 				   GFP_KERNEL);
 	if (!serialpipe_ports) {
-		kfree(serialecho_ports);
-		pr_err("serialsim: Unable to allocate pipe ports.\n");
-		rv = ENOMEM;
+		rv = -ENOMEM;
 		goto out;
 	}
 
 	serialecho_driver.nr = nr_echo_ports;
 	rv = uart_register_driver(&serialecho_driver);
 	if (rv) {
-		kfree(serialecho_ports);
-		kfree(serialpipe_ports);
-		pr_err("serialsim: Unable to register driver.\n");
+		pr_err("serialsim: Unable to register echo driver.\n");
 		goto out;
 	}
 
 	serialpipea_driver.nr = nr_pipe_ports;
 	rv = uart_register_driver(&serialpipea_driver);
 	if (rv) {
-		uart_unregister_driver(&serialecho_driver);
-		kfree(serialecho_ports);
-		kfree(serialpipe_ports);
-		pr_err("serialsim: Unable to register driver.\n");
-		goto out;
+		pr_err("serialsim: Unable to register pipe a driver.\n");
+		goto out_unreg_echo;
 	}
 
 	serialpipeb_driver.nr = nr_pipe_ports;
 	rv = uart_register_driver(&serialpipeb_driver);
 	if (rv) {
-		uart_unregister_driver(&serialpipea_driver);
-		uart_unregister_driver(&serialecho_driver);
-		kfree(serialecho_ports);
-		kfree(serialpipe_ports);
-		pr_err("serialsim: Unable to register driver.\n");
-		goto out;
+		pr_err("serialsim: Unable to register pipe b driver.\n");
+		goto out_unreg_pipea;
 	}
 
 	for (i = 0; i < nr_echo_ports; i++) {
@@ -1050,10 +1042,17 @@ static int __init serialsim_init(void)
 			serialsim_set_null_modem(intfb, true);
 		}
 	}
-	rv = 0;
+	return 0;
 
-	pr_info("serialsim ready\n");
+out_unreg_pipea:
+	uart_unregister_driver(&serialpipea_driver);
+out_unreg_echo:
+	uart_unregister_driver(&serialecho_driver);
 out:
+	if (serialecho_ports)
+		kfree(serialecho_ports);
+	if (serialpipe_ports)
+		kfree(serialpipe_ports);
 	return rv;
 }
 
