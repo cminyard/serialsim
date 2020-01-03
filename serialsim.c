@@ -964,7 +964,7 @@ static int __init serialsim_init(void)
 		/* Won't configure without some I/O or mem address set. */
 		port->iobase = 1;
 		port->line = i;
-		port->flags = UPF_BOOT_AUTOCONF;
+		port->flags = UPF_BOOT_AUTOCONF | UPF_SOFT_FLOW;
 		port->ops = &serialecho_ops;
 		spin_lock_init(&port->lock);
 		port->attr_group = &serialsim_dev_attr_group;
@@ -998,7 +998,7 @@ static int __init serialsim_init(void)
 		/* Won't configure without some I/O or mem address set. */
 		porta->iobase = 1;
 		porta->line = i / 2;
-		porta->flags = UPF_BOOT_AUTOCONF;
+		porta->flags = UPF_BOOT_AUTOCONF | UPF_SOFT_FLOW;
 		porta->ops = &serialpipea_ops;
 		spin_lock_init(&porta->lock);
 		porta->attr_group = &serialsim_dev_attr_group;
@@ -1012,7 +1012,7 @@ static int __init serialsim_init(void)
 		 */
 		portb->iobase = 1;
 		portb->line = i / 2;
-		portb->flags = UPF_BOOT_AUTOCONF;
+		portb->flags = UPF_BOOT_AUTOCONF | UPF_SOFT_FLOW;
 		portb->ops = &serialpipeb_ops;
 		portb->attr_group = &serialsim_dev_attr_group;
 		spin_lock_init(&portb->lock);
