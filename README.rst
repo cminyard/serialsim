@@ -1,5 +1,5 @@
 =====================================
-serialsim - A kernel serial simualtor
+serialsim - A kernel serial simulator
 =====================================
 
 :Author: Corey Minyard <minyard@mvista.com> / <minyard@acm.org>
