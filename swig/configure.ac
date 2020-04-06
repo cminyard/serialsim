@@ -82,6 +82,8 @@ if test "x$tryswig" = "xyes"; then
    if test "x$SWIG" != "x"; then
       AC_DEFINE([HAVE_SWIG], [], [Have swig installed])
       SWIG_DIR=swig
+   else
+      AC_MSG_ERROR([Unable to find swig, maybe you need to install it?])
    fi
 fi
 AC_SUBST(SWIG_DIR)
