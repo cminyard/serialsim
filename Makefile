@@ -7,8 +7,9 @@ ccflags-y += -I$(src)/include
 all:
 	make -C $(my_moddir)/build M=$(PWD) modules
 
+# Do our own clean, otherwise swig/serialsim.i gets removed
 clean:
-	make -C $(my_moddir)/build M=$(PWD) clean
+	rm -f *.o* *.ko *.mod*
 
 prefix = /usr/local
 includedir = $(prefix)/include
