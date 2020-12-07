@@ -72,7 +72,7 @@ char *get_remote_rs485(int fd) {
 
     rv = remote_rs485(fd, &str);
     if (rv)
-	err_handle("get_remote_termios", rv);
+	err_handle("get_remote_rs485", rv);
     return str;
 }
 
