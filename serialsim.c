@@ -332,7 +332,7 @@ static void serialsim_transfer_data(struct uart_port *port,
 }
 
 static unsigned int serialsim_get_flag(struct serialsim_intf *intf,
-					unsigned int *status)
+				       unsigned int *status)
 {
 	unsigned int flags = intf->flags;
 
@@ -344,11 +344,7 @@ static unsigned int serialsim_get_flag(struct serialsim_intf *intf,
 		intf->flags &= ~DO_OVERRUN_ERR;
 	}
 
-	if (flags & DO_BREAK && !intf->break_reported) {
-		intf->port.icount.brk++;
-		intf->break_reported = true;
-		return TTY_BREAK;
-	}
+	/* Break is handled separately. */
 	if (flags & DO_FRAME_ERR) {
 		intf->port.icount.frame++;
 		intf->flags &= ~DO_FRAME_ERR;
@@ -435,17 +431,26 @@ static int serialsim_thread(void *data)
 		 * buffer.
 		 */
 		spin_lock_irq(&port->lock);
-		flag = serialsim_get_flag(intf, &status);
 		if (intf->rx_enabled) {
+			if (intf->flags & DO_BREAK && !intf->break_reported) {
+				intf->port.icount.brk++;
+				intf->break_reported = true;
+				uart_insert_char(port, intf->flags,
+						 DO_OVERRUN_ERR, 0, TTY_BREAK);
+				if (pos == 0) {
+					pos = 1;
+					goto skip_send;
+				}
+			}
 			for (to_send = 0; to_send < pos; to_send++) {
+				flag = serialsim_get_flag(intf, &status);
 				port->icount.rx++;
 				uart_insert_char(port, status,
 						 DO_OVERRUN_ERR,
 						 buf[to_send], flag);
-				flag = 0;
-				status = 0;
 			}
 		}
+	skip_send:
 		spin_unlock_irq(&port->lock);
 
 		if (pos)
