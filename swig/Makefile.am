@@ -2,7 +2,7 @@
 ACLOCAL_AMFLAGS = -I m4
 
 AM_CFLAGS = $(PYTHON_CPPFLAGS) \
-	    -I $(top_srcdir)
+	    -I $(top_srcdir)/../include
 
 pythonlibdir=$(PYTHON_INSTALL_LIB_DIR)
 PYPATH=$(top_builddir)/swig/python:$(top_builddir)/swig/python/.libs
