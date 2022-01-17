@@ -69,6 +69,31 @@ struct serialsim_intf {
 	spinlock_t mctrl_lock;
 	struct tasklet_struct mctrl_tasklet;
 
+	/*
+	 * The modem control state handling is not perfect.
+	 * Currently, if data is being transferred in the thread, it
+	 * will delay the modemcontrol until all the data is
+	 * transferred.  Otherwise it will deliver the data
+	 * immediately in the tasklet.
+	 *
+	 * The problem is that there is a race between setting the
+	 * mctrl and transferring the data.  When the last byte is
+	 * read from the origin serial port on a close, the modem
+	 * control lines are set immediately by close code.  But you
+	 * want the data being transferred into the receive buffer
+	 * before you issue the modem control to the destination port.
+	 *
+	 * The current scheme doesn't handle multiple modem control
+	 * changes, and the modem control changes should really ride
+	 * with the data to be after specific bytes.  But the current
+	 * scheme works ok.
+	 */
+
+	/* Modem state to send to the other side. */
+	bool mctrl_pending;
+	bool hold_mctrl;
+	unsigned int new_mctrl;
+
 	/* My transmitter is enabled. */
 	bool tx_enabled;
 
@@ -253,10 +278,18 @@ static void mctrl_tasklet(unsigned long data)
 static void serialsim_set_mctrl(struct uart_port *port, unsigned int mctrl)
 {
 	struct serialsim_intf *intf = serialsim_port_to_intf(port);
+	bool do_tasklet = false;
 
 	spin_lock(&intf->mctrl_lock);
-	intf->mctrl &= ~SETTABLE_MCTRL;
-	intf->mctrl |= mctrl & SETTABLE_MCTRL;
+	if (circ_sbuf_empty(&intf->buf) && !intf->mctrl_pending &&
+	    !intf->hold_mctrl) {
+		intf->mctrl &= ~SETTABLE_MCTRL;
+		intf->mctrl |= mctrl & SETTABLE_MCTRL;
+		do_tasklet = true;
+	} else {
+		intf->mctrl_pending = true;
+		intf->new_mctrl = mctrl;
+	}
 	spin_unlock(&intf->mctrl_lock);
 
 	/*
@@ -265,7 +298,8 @@ static void serialsim_set_mctrl(struct uart_port *port, unsigned int mctrl)
 	 * we have to run this elsewhere.  Note that we run the other
 	 * end's tasklet.
 	 */
-	tasklet_schedule(&intf->ointf->mctrl_tasklet);
+	if (do_tasklet)
+		tasklet_schedule(&intf->ointf->mctrl_tasklet);
 }
 
 static unsigned int serialsim_get_mctrl(struct uart_port *port)
@@ -390,12 +424,16 @@ static int serialsim_thread(void *data)
 	unsigned int residual = 0;
 
 	while (!kthread_should_stop()) {
-		unsigned int to_send;
+		unsigned int to_send, i;
 		unsigned int div;
-		unsigned char buf[SERIALSIM_XBUFSIZE];
-		unsigned int pos = 0;
 		unsigned int flag;
 		unsigned int status = 0;
+		bool mctrl_pending;
+		unsigned int new_mctrl;
+
+		spin_lock_irq(&intf->mctrl_lock);
+		intf->hold_mctrl = true;
+		spin_unlock_irq(&intf->mctrl_lock);
 
 		spin_lock_irq(&oport->lock);
 		if (ointf->tx_enabled)
@@ -407,27 +445,19 @@ static int serialsim_thread(void *data)
 		spin_unlock_irq(&oport->lock);
 
 		/*
-		 *  Move from the interface buffer into the local
-		 *  buffer based on the simulated serial speed.
+		 *  Calculate how many bytes to send based on the
+		 *  simulated serial speed.
 		 */
 		to_send = intf->bytes_per_interval;
 		residual += intf->per_interval_residual;
 		div = intf->div;
-		while (!circ_sbuf_empty(tbuf) && to_send) {
-			buf[pos++] = tbuf->buf[tbuf->tail];
-			tbuf->tail = circ_sbuf_next(tbuf->tail);
-			to_send--;
-		}
 		if (residual >= div) {
 			residual -= div;
-			if (!circ_sbuf_empty(tbuf)) {
-				buf[pos++] = tbuf->buf[tbuf->tail];
-				tbuf->tail = circ_sbuf_next(tbuf->tail);
-			}
+			to_send++;
 		}
 
 		/*
-		 * Move from the internal buffer into my receive
+		 * Move from the interface buffer into my receive
 		 * buffer.
 		 */
 		spin_lock_irq(&port->lock);
@@ -437,24 +467,41 @@ static int serialsim_thread(void *data)
 				intf->break_reported = true;
 				uart_insert_char(port, intf->flags,
 						 DO_OVERRUN_ERR, 0, TTY_BREAK);
-				if (pos == 0) {
-					pos = 1;
+				if (to_send == 0) {
+					to_send = 1; /* Force a push. */
 					goto skip_send;
 				}
 			}
-			for (to_send = 0; to_send < pos; to_send++) {
+			for (i = 0; i < to_send && !circ_sbuf_empty(tbuf);
+			     i++) {
+				unsigned char c = tbuf->buf[tbuf->tail];
+
+				tbuf->tail = circ_sbuf_next(tbuf->tail);
 				flag = serialsim_get_flag(intf, &status);
 				port->icount.rx++;
 				uart_insert_char(port, status,
 						 DO_OVERRUN_ERR,
-						 buf[to_send], flag);
+						 c, flag);
 			}
 		}
 	skip_send:
 		spin_unlock_irq(&port->lock);
 
-		if (pos)
+		if (to_send)
 			tty_flip_buffer_push(&port->state->port);
+
+		spin_lock_irq(&intf->mctrl_lock);
+		intf->hold_mctrl = false;
+		mctrl_pending = intf->mctrl_pending;
+		new_mctrl = intf->new_mctrl;
+		intf->mctrl_pending = false;
+		if (mctrl_pending) {
+			intf->mctrl &= ~SETTABLE_MCTRL;
+			intf->mctrl |= new_mctrl & SETTABLE_MCTRL;
+		}
+		spin_unlock_irq(&intf->mctrl_lock);
+		if (mctrl_pending)
+			mctrl_tasklet((unsigned long) ointf);
 
 		serialsim_thread_delay();
 	}
