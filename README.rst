@@ -28,6 +28,32 @@ To build the python modules, cd to "swig" and run:
 ./configure
 make
 
+=======
+Signing
+=======
+
+If your kernel requires signed modules, you can sign it using:
+
+  make sign
+
+This will create "private_key.der" and "public_key.der", and it will
+sign the module with "private_key.der".  SAVE THESE KEYS!  You will
+need them for signing in the future.  The makefile will not overwrite
+them, but they could get deleted.  You will also need to install the
+public key so the kernel can see it.  After the keys are generated, do:
+
+  sudo mokutil --import public_key.der
+
+It will ask for a password, input a new password.  Then reboot the
+system.  When the system reboots, it will prompt "Perform MOK
+management" Change to "Enroll MOK" and hit enter.  Then in "Enroll
+MOK", select "Continue.  Then enroll the key, and it will prompt you
+for the password you entered.  Then you can load the module.
+
+This info was pulled from:
+
+https://www.janhendrikpeters.de/2021/05/11/obs-virtual-camera-secure-boot/
+
 =====
 Using
 =====

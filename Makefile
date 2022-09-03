@@ -11,6 +11,15 @@ all:
 clean:
 	rm -f *.o* *.ko *.mod*
 
+private_key.der: openssl.conf
+	openssl req -x509 -new -nodes -utf8 -sha256 -days 36500  \
+		-batch -config openssl.conf -outform DER \
+		-out public_key.der  -keyout private_key.der
+
+sign: all private_key.der
+	/usr/src/kernels/$(shell uname -r)/scripts/sign-file sha256 \
+		private_key.der public_key.der serialsim.ko
+
 prefix = /usr/local
 includedir = $(prefix)/include
 
