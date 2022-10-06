@@ -4,21 +4,6 @@ AC_PROG_CC
 AM_PROG_AR
 AM_PROG_LIBTOOL
 
-tryswig=yes
-swigprog=
-AC_ARG_WITH(swig,
-[  --with-swig[[=yes|no|PATH]]       Look for swig, with the optional path.],
-    if test "x$withval" = "x"; then
-      tryswig=yes
-    elif test "x$withval" = "xyes"; then
-      tryswig=yes
-    elif test "x$withval" = "xno"; then
-      tryswig=no
-    else
-      swigprog=$withval
-    fi,
-)
-
 pythonprog=
 trypython=yes
 AC_ARG_WITH(python,
@@ -71,29 +56,10 @@ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 AC_CONFIG_MACRO_DIR([m4])
 AC_STDC_HEADERS
 
-# Now check for swig
-SWIG_DIR=
-SWIG=
-if test "x$tryswig" = "xyes"; then
-   if test "x$swigprog" != "x"; then
-      SWIG="$swigprog"
-   fi
-   AX_PKG_SWIG([1.3.21])
-   if test "x$SWIG" != "x"; then
-      AC_DEFINE([HAVE_SWIG], [], [Have swig installed])
-      SWIG_DIR=swig
-   else
-      AC_MSG_ERROR([Unable to find swig, maybe you need to install it?])
-   fi
-fi
-AC_SUBST(SWIG_DIR)
-AC_SUBST(SWIG)
-
 # Handle PYTHON support
 PYTHON_DIR=
 PYTHON_INSTALL_DIR=
 PYTHON_INSTALL_LIB_DIR=
-PYTHON_SWIG_FLAGS=
 if test "x$trypython" = "xyes"; then
    if test "x$pythonprog" != "x"; then
       PYTHON="$pythonprog"
@@ -104,7 +70,6 @@ if test "x$trypython" = "xyes"; then
    AX_PYTHON_DEVEL
 fi
 if test "x$PYTHON" != "x"; then
-   AX_PROG_PYTHON_VERSION([3.0.0], [PYTHON_SWIG_FLAGS=-py3], [])
    PYTHON_DIR=python
    if test "x$pythoninstalldir" = "x"; then
       PYTHON_INSTALL_DIR="$PYTHON_SITE_PKG"
@@ -116,31 +81,10 @@ if test "x$PYTHON" != "x"; then
    else
       PYTHON_INSTALL_LIB_DIR="$pythoninstalllibdir"
    fi
-
-   if test "x$pythonusepthreads" = "x"; then
-      cat - <<_ACEOF >conftest.py
-try:
-  import threading
-  print('yes')
-except:
-  print('no')
-_ACEOF
-      pythonusepthreads=`$PYTHON conftest.py`
-      rm -f conftest.py
-   fi
-   echo "checking for python threads... $pythonusepthreads"
-
-   if test "x$pythonusepthreads" = "xyes"; then
-      PYTHON_HAS_POSIX_THREADS=1
-   else
-      PYTHON_HAS_POSIX_THREADS=0
-   fi
 fi
 
 AC_SUBST(PYTHON_DIR)
 AC_SUBST(PYTHON_INSTALL_DIR)
 AC_SUBST(PYTHON_INSTALL_LIB_DIR)
-AC_SUBST(PYTHON_HAS_POSIX_THREADS)
-AC_SUBST(PYTHON_SWIG_FLAGS)
 
 AC_OUTPUT([Makefile])
