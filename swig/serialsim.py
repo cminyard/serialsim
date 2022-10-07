@@ -1,6 +1,57 @@
 import ctypes
 import fcntl
+import platform
 import termios
+
+if platform.machine() == "sparc":
+    # https://github.com/torvalds/linux/blob/v6.0/arch/sparc/include/uapi/asm/termbits.h#L10
+    tcflag_t = ctypes.c_ulong
+else:
+    tcflag_t = ctypes.c_uint
+
+cc_t = ctypes.c_ubyte
+
+speed_t = ctypes.c_uint
+
+if platform.machine() in ["mips", "mips64"]:
+    # https://github.com/torvalds/linux/blob/v6.0/arch/mips/include/uapi/asm/termbits.h#L22
+    NCCS = 23
+else:
+    NCCS = 19
+
+UNCCS = 32
+
+
+class termios2(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("c_iflag", tcflag_t),
+        ("c_oflag", tcflag_t),
+        ("c_cflag", tcflag_t),
+        ("c_lflag", tcflag_t),
+        ("c_line", cc_t),
+        ("c_cc", cc_t * NCCS),
+        ("c_ispeed", speed_t),
+        ("c_ospeed", speed_t),
+    ]
+
+
+class serial_rs485(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("flags", ctypes.c_uint32),
+        ("delay_rts_before_send", ctypes.c_uint32),
+        ("delay_rts_after_send", ctypes.c_uint32),
+        ("addr_recv", ctypes.c_uint8),
+        ("addr_dest", ctypes.c_uint8),
+        ("padding0", ctypes.c_uint8 * 2),
+        ("padding1", ctypes.c_uint32 * 4),
+    ]
+
+
+def _IOR(ty, nr, size):
+    return (2 << 30) | (ord(ty) << 8) | (nr << 0) | (size << 16)
+
 
 SERIALSIM_TIOCM_CAR = 0x40
 SERIALSIM_TIOCM_CTS = 0x20
@@ -13,36 +64,31 @@ SERIALSIM_TTY_FRAME = 0x4
 SERIALSIM_TTY_PARITY = 0x8
 SERIALSIM_TTY_OVERRUN = 0x10
 
-tcflag_t = ctypes.c_uint
-cc_t = ctypes.c_ubyte
-speed_t = ctypes.c_uint
-NCCS = 19
-UNCCS = 32
+SER_RS485_ENABLED = 1 << 0
+SER_RS485_RTS_ON_SEND = 1 << 1
+SER_RS485_RTS_AFTER_SEND = 1 << 2
+SER_RS485_RX_DURING_TX = 1 << 4
+SER_RS485_TERMINATE_BUS = 1 << 5
 
-class termios2(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = [("c_iflag", tcflag_t),
-                ("c_oflag", tcflag_t),
-                ("c_cflag", tcflag_t),
-                ("c_lflag", tcflag_t),
-                ("c_line", cc_t),
-                ("c_cc", cc_t * NCCS),
-                ("c_ispeed", speed_t),
-                ("c_ospeed", speed_t)]
+TIOCSERSREMNULLMODEM = 0x54E4
+TIOCSERSREMMCTRL = 0x54E5
+TIOCSERSREMERR = 0x54E6
+TIOCSERGREMTERMIOS = _IOR("T", 0xE7, ctypes.sizeof(termios2))
+TIOCSERGREMNULLMODEM = _IOR("T", 0xE8, ctypes.sizeof(ctypes.c_int))
+TIOCSERGREMMCTRL = _IOR("T", 0xE9, ctypes.sizeof(ctypes.c_uint))
+TIOCSERGREMERR = _IOR("T", 0xEA, ctypes.sizeof(ctypes.c_uint))
+TIOCSERGREMRS485 = _IOR("T", 0xEB, ctypes.sizeof(serial_rs485))
 
-def _IOR(ty, nr, size):
-    return (2 << 30) | (ord(ty) << 8) | (nr << 0) | (size << 16)
-
-TIOCSERGREMTERMIOS = _IOR('T', 0xe7, ctypes.sizeof(termios2))
 
 def getspeed(baudrate):
-    return getattr(termios, 'B{}'.format(baudrate))
+    return getattr(termios, "B{}".format(baudrate))
+
 
 def get_remote_termios(fd):
     ktermios = termios2()
-    rv = fcntl.ioctl(fd, TIOCSERGREMTERMIOS, ktermios);
+    assert fcntl.ioctl(fd, TIOCSERGREMTERMIOS, ktermios) == 0
     user_c_cc = []
-    for i in range (0, UNCCS):
+    for i in range(0, UNCCS):
         if i == termios.VTIME or i == termios.VMIN:
             user_c_cc.append(ktermios.c_cc[i])
         elif i < NCCS:
@@ -59,75 +105,51 @@ def get_remote_termios(fd):
         tuple(user_c_cc),
     )
 
-class serial_rs485(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = [("flags", ctypes.c_uint32),
-                ("delay_rts_before_send", ctypes.c_uint32),
-                ("delay_rts_after_send", ctypes.c_uint32),
-                ("addr_recv", ctypes.c_uint8),
-                ("addr_dest", ctypes.c_uint8),
-                ("padding0", ctypes.c_uint8 * 2),
-                ("padding1", ctypes.c_uint32 * 4)]
-
-TIOCSERGREMRS485 = _IOR('T', 0xeb, ctypes.sizeof(serial_rs485))
-
-SER_RS485_ENABLED = 1 << 0
-SER_RS485_RTS_ON_SEND = 1 << 1
-SER_RS485_RTS_AFTER_SEND = 1 << 2
-SER_RS485_RX_DURING_TX = 1 << 4
-SER_RS485_TERMINATE_BUS = 1 << 5
 
 def get_remote_rs485(fd):
     rs485 = serial_rs485()
-    rv = fcntl.ioctl(fd, TIOCSERGREMRS485, rs485);
+    assert fcntl.ioctl(fd, TIOCSERGREMRS485, rs485) == 0
     tmplist = []
     tmplist.append(str(rs485.delay_rts_before_send))
     tmplist.append(str(rs485.delay_rts_after_send))
-    if (rs485.flags & SER_RS485_ENABLED):
+    if rs485.flags & SER_RS485_ENABLED:
         tmplist.append("enabled")
-    if (rs485.flags & SER_RS485_RTS_ON_SEND):
+    if rs485.flags & SER_RS485_RTS_ON_SEND:
         tmplist.append("rts_on_send")
-    if (rs485.flags & SER_RS485_RTS_AFTER_SEND):
+    if rs485.flags & SER_RS485_RTS_AFTER_SEND:
         tmplist.append("rts_after_send")
-    if (rs485.flags & SER_RS485_RX_DURING_TX):
+    if rs485.flags & SER_RS485_RX_DURING_TX:
         tmplist.append("rx_during_tx")
-    if (rs485.flags & SER_RS485_TERMINATE_BUS):
+    if rs485.flags & SER_RS485_TERMINATE_BUS:
         tmplist.append("terminate_bus")
-    return ' '.join(tmplist)
+    return " ".join(tmplist)
 
-TIOCSERSREMMCTRL = 0x54e5
 
 def set_remote_modem_ctl(fd, val):
-    return fcntl.ioctl(fd, TIOCSERSREMMCTRL, val)
+    assert fcntl.ioctl(fd, TIOCSERSREMMCTRL, val) == 0
 
-
-TIOCSERGREMMCTRL = _IOR('T', 0xe9, ctypes.sizeof(ctypes.c_uint))
 
 def get_remote_modem_ctl(fd):
     mctl = ctypes.c_uint()
-    rv = fcntl.ioctl(fd, TIOCSERGREMMCTRL, mctl)
+    assert fcntl.ioctl(fd, TIOCSERGREMMCTRL, mctl) == 0
     return mctl.value
 
-TIOCSERSREMERR = 0x54e6
 
 def set_remote_serial_err(fd, err):
-    return fcntl.ioctl(fd, TIOCSERSREMERR, err)
+    assert fcntl.ioctl(fd, TIOCSERSREMERR, err) == 0
 
-TIOCSERGREMERR = _IOR('T', 0xea, ctypes.sizeof(ctypes.c_uint))
 
 def get_remote_serial_err(fd):
     err = ctypes.c_uint()
-    rv = fcntl.ioctl(fd, TIOCSERGREMERR, err)
-    return mctl.value
+    assert fcntl.ioctl(fd, TIOCSERGREMERR, err) == 0
+    return err.value
 
-TIOCSERSREMNULLMODEM = 0x54e4
 
 def set_remote_null_modem(fd, val):
-    return fcntl.ioctl(fd, TIOCSERSREMNULLMODEM, val)
+    assert fcntl.ioctl(fd, TIOCSERSREMNULLMODEM, val) == 0
 
-TIOCSERGREMNULLMODEM = _IOR('T', 0xe8, ctypes.sizeof(ctypes.c_int))
 
 def get_remote_null_modem(fd):
     val = ctypes.c_int()
-    rv = fcntl.ioctl(fd, TIOCSERGREMNULLMODEM, val)
+    assert fcntl.ioctl(fd, TIOCSERGREMNULLMODEM, val) == 0
     return val.value
