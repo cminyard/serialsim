@@ -436,7 +436,7 @@ static int serialsim_thread(void *data)
 		spin_unlock_irq(&intf->mctrl_lock);
 
 		spin_lock_irq(&oport->lock);
-		if (ointf->tx_enabled)
+		if (ointf->tx_enabled && oport->state->xmit.buf)
 			/*
 			 * Move bytes from the other port's transmit buffer to
 			 * the interface buffer.
