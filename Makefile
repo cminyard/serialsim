@@ -16,8 +16,10 @@ private_key.der: openssl.conf
 		-batch -config openssl.conf -outform DER \
 		-out public_key.der  -keyout private_key.der
 
+KERNELBASE=/usr/src/linux-headers-$(shell uname -r)
+
 sign: all private_key.der
-	/usr/src/kernels/$(shell uname -r)/scripts/sign-file sha256 \
+	$(KERNELBASE)/scripts/sign-file sha256 \
 		private_key.der public_key.der serialsim.ko
 
 prefix = /usr/local

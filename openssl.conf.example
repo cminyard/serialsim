@@ -1,0 +1,17 @@
+[ req ]
+default_bits = 4096
+distinguished_name = mycert
+prompt = no
+string_mask = utf8only
+x509_extensions = extensions
+
+[ jhpcert ]
+O = me
+CN = me
+emailAddress = me@localhost
+
+[ extensions ]
+basicConstraints=critical,CA:FALSE
+keyUsage=digitalSignature
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid

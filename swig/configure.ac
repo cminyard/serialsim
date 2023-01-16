@@ -1,8 +1,8 @@
-AC_INIT([serialsim], [1.0-rc2], [minyard@acm.org])
+AC_INIT([serialsim],[1.0-rc2],[minyard@acm.org])
 AM_INIT_AUTOMAKE([-Wall])
 AC_PROG_CC
 AM_PROG_AR
-AM_PROG_LIBTOOL
+LT_INIT
 
 pythonprog=
 trypython=yes
@@ -54,7 +54,15 @@ AC_ARG_WITH(pythonusepthreads,
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 AC_CONFIG_MACRO_DIR([m4])
-AC_STDC_HEADERS
+m4_warn([obsolete],
+[The preprocessor macro `STDC_HEADERS' is obsolete.
+  Except in unusual embedded environments, you can safely include all
+  ISO C90 headers unconditionally.])dnl
+# Autoupdate added the next two lines to ensure that your configure
+# script's behavior did not change.  They are probably safe to remove.
+AC_CHECK_INCLUDES_DEFAULT
+AC_PROG_EGREP
+
 
 # Handle PYTHON support
 PYTHON_DIR=
@@ -87,4 +95,5 @@ AC_SUBST(PYTHON_DIR)
 AC_SUBST(PYTHON_INSTALL_DIR)
 AC_SUBST(PYTHON_INSTALL_LIB_DIR)
 
-AC_OUTPUT([Makefile])
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT

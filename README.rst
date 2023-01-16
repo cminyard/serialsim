@@ -32,7 +32,15 @@ make
 Signing
 =======
 
-If your kernel requires signed modules, you can sign it using:
+If your kernel requires signed modules, you can sign.  First copy the
+openssl.conf.example to openssl.conf.  Edit it and change the
+distinguished_name, the value in [] referred to by distinguised_name,
+O, CN, and emailAddress fields to you.
+
+This makefile uses a script from the kernel named "sign-file".  You
+may have to modify KERNELBASE in the makefile to get it.
+
+Then sign the module using:
 
   make sign
 
