@@ -27,6 +27,25 @@
 
 #include <linux/serialsim.h>
 
+#ifndef TCGETS2
+#error "This module is only supported with TCGETS2"
+#endif
+
+#ifndef kernel_termios_to_user_termios
+/* This went away in 6.1. */
+static inline int kernel_termios_to_user_termios(struct termios2 __user *u,
+                                                 struct ktermios *k)
+{
+        return copy_to_user(u, k, sizeof(struct termios2));
+}
+
+/* New in 6.1 */
+#define CONST_KTERMIOS const
+
+/* New in 6.0, but just ride on the 6.1 thing. */
+#define RS485_HAS_TERMIOS struct ktermios *termios,
+#endif
+
 /*
  * Port types for the various interfaces.
  */
@@ -589,7 +608,7 @@ static void serialsim_release_port(struct uart_port *port)
 
 static void
 serialsim_set_termios(struct uart_port *port, struct ktermios *termios,
-		      struct ktermios *old)
+		      CONST_KTERMIOS struct ktermios *old)
 {
 	struct serialsim_intf *intf = serialsim_port_to_intf(port);
 	unsigned int baud = uart_get_baud_rate(port, termios, old,
@@ -602,7 +621,7 @@ serialsim_set_termios(struct uart_port *port, struct ktermios *termios,
 	spin_unlock_irqrestore(&port->lock, flags);
 }
 
-static int serialsim_rs485(struct uart_port *port,
+static int serialsim_rs485(struct uart_port *port, RS485_HAS_TERMIOS
 			   struct serial_rs485 *newrs485)
 {
 	struct serialsim_intf *intf = serialsim_port_to_intf(port);
