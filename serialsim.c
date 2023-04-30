@@ -44,6 +44,9 @@ static inline int kernel_termios_to_user_termios(struct termios2 __user *u,
 
 /* New in 6.0, but just ride on the 6.1 thing. */
 #define RS485_HAS_TERMIOS struct ktermios *termios,
+
+/* Also new in 6.0. */
+#define HAS_RS485_SUPPORTED
 #endif
 
 /*
@@ -979,6 +982,14 @@ static struct uart_driver serialpipeb_driver = {
 	.dev_name = "ttyPipeB"
 };
 
+#ifdef HAS_RS485_SUPPORTED
+static const struct serial_rs485 serialsim_rs485_supported = {
+        .flags = SER_RS485_ENABLED | SER_RS485_RTS_ON_SEND |
+                 SER_RS485_RTS_AFTER_SEND | SER_RS485_RX_DURING_TX,
+        .delay_rts_before_send = 1,
+        .delay_rts_after_send = 1,
+};
+#endif
 
 static int __init serialsim_init(void)
 {
@@ -1074,6 +1085,9 @@ static int __init serialsim_init(void)
 		spin_lock_init(&porta->lock);
 		porta->attr_group = &serialsim_dev_attr_group;
 		porta->rs485_config = serialsim_rs485;
+#ifdef HAS_RS485_SUPPORTED
+		porta->rs485_supported = serialsim_rs485_supported;
+#endif
 
 		/*
 		 * uart_add_one_port() does an mctrl operation, which will
@@ -1088,6 +1102,9 @@ static int __init serialsim_init(void)
 		portb->attr_group = &serialsim_dev_attr_group;
 		spin_lock_init(&portb->lock);
 		portb->rs485_config = serialsim_rs485;
+#ifdef HAS_RS485_SUPPORTED
+		portb->rs485_supported = serialsim_rs485_supported;
+#endif
 
 		rv = uart_add_one_port(&serialpipea_driver, porta);
 		if (rv) {
