@@ -24,6 +24,7 @@
 #include <linux/ctype.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
+#include <linux/version.h>
 
 #include <linux/serialsim.h>
 
@@ -31,7 +32,7 @@
 #error "This module is only supported with TCGETS2"
 #endif
 
-#ifndef kernel_termios_to_user_termios
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,1,0)
 /* This went away in 6.1. */
 static inline int kernel_termios_to_user_termios(struct termios2 __user *u,
                                                  struct ktermios *k)
@@ -41,12 +42,18 @@ static inline int kernel_termios_to_user_termios(struct termios2 __user *u,
 
 /* New in 6.1 */
 #define CONST_KTERMIOS const
+#else
+#define CONST_KTERMIOS
+#endif
 
-/* New in 6.0, but just ride on the 6.1 thing. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,0,0)
+/* New in 6.0. */
 #define RS485_HAS_TERMIOS struct ktermios *termios,
 
 /* Also new in 6.0. */
 #define HAS_RS485_SUPPORTED
+#else
+#define RS485_HAS_TERMIOS
 #endif
 
 /*
