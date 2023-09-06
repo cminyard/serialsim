@@ -293,3 +293,20 @@ a dynamic pipe, do something like::
    serialsim.free_id(p.fileno())
 
    p.close()
+
+Some higher level functions exist to help out::
+
+   (num, pipea, pipeb) = serialsim.alloc_pipe()
+   # pipea will be "/dev/ttyPipeA%d" % num, pipeb similar
+   serialsim.free_pipe(num)
+
+And the equivalent for echo::
+
+   (num, echo) = serialsim.alloc_echo()
+   # echo will be "/dev/ttyEcho%d" % num
+   serialsim.free_echo(num)
+
+These keep in internal opened /dev/ttyPipe and /dev/ttyEcho.  Also,
+more importantly, they wait for the device files to appear.  If the
+device(s) don't appear in a timely manner, these will raise an
+exception.

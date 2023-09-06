@@ -2,6 +2,7 @@ import ctypes
 import fcntl
 import platform
 import termios
+import time
 
 if platform.machine() == "sparc":
     # https://github.com/torvalds/linux/blob/v6.0/arch/sparc/include/uapi/asm/termbits.h#L10
@@ -158,10 +159,50 @@ def get_remote_null_modem(fd):
     return val.value
 
 def alloc_id(fd):
-    rv = fcntl.ioctl(fd, SERIALSIM_ALLOC_ID, 0)
-    assert rv >= 0
-    return rv
+    return fcntl.ioctl(fd, SERIALSIM_ALLOC_ID, 0)
 
 def free_id(fd, val):
-    assert fcntl.ioctl(fd, SERIALSIM_FREE_ID, fd) == 0
-    
+    fcntl.ioctl(fd, SERIALSIM_FREE_ID, fd)
+
+def wait_for_dev(dev):
+    count = 0
+    while not os.path.exists(dev):
+        count++
+        if count > 100:
+            raise Exception("New device %s did not appear" % dev);
+        time.sleep(.01)
+
+p_echo = None
+
+def alloc_p_echo():
+    p_echo = f_open("/dev/ttyEcho", "w")
+
+def alloc_echo():
+    if p_echo is None:
+        alloc_p_echo()
+    num = alloc_id(p_echo)
+    dev = "/dev/ttyEcho%d" % rv
+    wait_for_dev(dev)
+    return (num, dev)
+
+def free_echo(num):
+    free_id(p_echo, num)
+
+p_pipe = None
+
+def alloc_p_pipe():
+    p_pipe = f_open("/dev/ttyPipe", "w")
+
+def alloc_pipe():
+    if p_pipe is None:
+        alloc_p_pipe()
+    num = alloc_id(p_pipe)
+    dev1 = "/dev/ttyPipeA%d" % rv
+    dev2 = "/dev/ttyPipeB%d" % rv
+    wait_for_dev(dev1)
+    wait_for_dev(dev2)
+    return (num, dev1, dev2)
+
+def free_pipe(num):
+    free_id(p_pipe, num)
+
