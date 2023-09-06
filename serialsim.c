@@ -1187,9 +1187,10 @@ const struct file_operations serialsim_echo_misc_fops = {
 };
 
 static struct miscdevice serialsim_echo_misc = {
-    .minor = MISC_DYNAMIC_MINOR,
-    .name = "ttyEcho",
-    .fops = &serialsim_echo_misc_fops
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "ttyEcho",
+	.fops = &serialsim_echo_misc_fops,
+	.mode = 0660
 };
 
 static long serialsim_pipe_ioctl(struct file *file,
@@ -1323,9 +1324,10 @@ const struct file_operations serialsim_pipe_misc_fops = {
 };
 
 static struct miscdevice serialsim_pipe_misc = {
-    .minor = MISC_DYNAMIC_MINOR,
-    .name = "ttyPipe",
-    .fops = &serialsim_pipe_misc_fops
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "ttyPipe",
+	.fops = &serialsim_pipe_misc_fops,
+	.mode = 0660
 };
 
 static int __init serialsim_init(void)
