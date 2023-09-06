@@ -79,6 +79,9 @@ TIOCSERGREMMCTRL = _IOR("T", 0xE9, ctypes.sizeof(ctypes.c_uint))
 TIOCSERGREMERR = _IOR("T", 0xEA, ctypes.sizeof(ctypes.c_uint))
 TIOCSERGREMRS485 = _IOR("T", 0xEB, ctypes.sizeof(serial_rs485))
 
+SERIALSIM_ALLOC_ID = 0x5391
+SERIALSIM_FREE_ID = 0x5392
+
 
 def getspeed(baudrate):
     return getattr(termios, "B{}".format(baudrate))
@@ -153,3 +156,12 @@ def get_remote_null_modem(fd):
     val = ctypes.c_int()
     assert fcntl.ioctl(fd, TIOCSERGREMNULLMODEM, val) == 0
     return val.value
+
+def serialsim_alloc_id(fd):
+    rv = fcntl.ioctl(fd, SERIALSIM_ALLOC_ID, 0)
+    assert rv >= 0
+    return rv
+
+def serialsim_free_id(fd, val):
+    assert fcntl.ioctl(fd, SERIALSIM_FREE_ID, fd)
+    

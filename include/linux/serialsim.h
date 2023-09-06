@@ -29,4 +29,8 @@
 #define TIOCSERGREMERR		_IOR('T', 0xea, unsigned int)
 #define TIOCSERGREMRS485	_IOR('T', 0xeb, struct serial_rs485)
 
+/* For the dynamic add/remove interface. */
+#define SERIALSIM_ALLOC_ID	0x5391
+#define SERIALSIM_FREE_ID	0x5392
+
 #endif
