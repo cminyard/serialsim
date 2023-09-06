@@ -26,6 +26,7 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/idr.h>
+#include <linux/miscdevice.h>
 
 #include <linux/serialsim.h>
 
@@ -1009,14 +1010,16 @@ static const struct serial_rs485 serialsim_rs485_supported = {
 };
 #endif
 
+static DEFINE_MUTEX(serialsim_num_mutex);
 static DEFINE_IDR(serialsim_echo_nums);
 static DEFINE_IDR(serialsim_pipe_nums);
 
-static struct serialsim_intf *serialsim_alloc_intf(struct idr *idr,
-						   unsigned int i,
-						   const char *name,
-						   const struct uart_ops *ops,
-						   int min_id, int max_id)
+static int serialsim_alloc_intf(struct idr *idr,
+				unsigned int i,
+				const char *name,
+				const struct uart_ops *ops,
+				int min_id, int max_id,
+				struct serialsim_intf **rintf)
 {
 	struct serialsim_intf *intf;
 	struct uart_port *port;
@@ -1024,7 +1027,7 @@ static struct serialsim_intf *serialsim_alloc_intf(struct idr *idr,
 	intf = kzalloc(sizeof(*intf), GFP_KERNEL);
 	if (!intf) {
 		pr_err("serialsim: Unable to alloc %s port %u\n", name, i);
-		return NULL;
+		return -ENOMEM;
 	}
 
 	intf->buf.buf = intf->xmitbuf;
@@ -1046,7 +1049,7 @@ static struct serialsim_intf *serialsim_alloc_intf(struct idr *idr,
 			pr_err("serialsim: Unable to alloc id for %s %u: %d\n",
 			       name, i, id);
 			kfree(intf);
-			return NULL;
+			return id;
 		}
 		intf->idr = idr;
 		port->line = id;
@@ -1054,7 +1057,8 @@ static struct serialsim_intf *serialsim_alloc_intf(struct idr *idr,
 		port->line = min_id;
 	}
 
-	return intf;
+	*rintf = intf;
+	return 0;
 }
 
 static void serialsim_free_intf(struct serialsim_intf *intf)
@@ -1082,6 +1086,249 @@ static int serialsim_add_port(int i, const char *name,
 	intf->driver = driver;
 	return 0;
 }
+
+struct serialsim_dyninfo {
+	struct idr nums;
+};
+
+static long serialsim_echo_ioctl(struct file *file,
+				 unsigned int cmd, unsigned long data)
+{
+	int rv = -ENOTTY;
+	struct serialsim_dyninfo *di = file->private_data;
+	struct serialsim_intf *intf;
+
+	mutex_lock(&serialsim_num_mutex);
+	switch (cmd) {
+	case SERIALSIM_ALLOC_ID:
+		rv = serialsim_alloc_intf(&serialsim_echo_nums, -1, "echo",
+					  &serialecho_ops, nr_echo_ports,
+					  nr_echo_ports + nr_dyn_echo_ports,
+					  &intf);
+		if (rv)
+			break;
+		rv = idr_alloc(&di->nums, intf,
+			       intf->port.line, intf->port.line + 1,
+			       GFP_KERNEL);
+		if (rv < 0) {
+			serialsim_free_intf(intf);
+			break;
+		}
+		intf->ointf = intf;
+		intf->do_null_modem = true;
+
+		rv = serialsim_add_port(-1, "echo", &serialecho_driver, intf);
+		if (rv) {
+			idr_remove(&di->nums, intf->port.line);
+			serialsim_free_intf(intf);
+		} else {
+			rv = intf->port.line;
+		}
+		break;
+
+	case SERIALSIM_FREE_ID:
+		struct serialsim_intf *intf = idr_remove(&di->nums, data);
+
+		rv = 0;
+		if (intf)
+			serialsim_free_intf(intf);
+		else
+			rv = -ENOENT;
+		break;
+
+	default:
+		break;
+	}
+	mutex_unlock(&serialsim_num_mutex);
+
+	return rv;
+}
+
+static int serialsim_echo_dyn_release(int id, void *p, void *data)
+{
+	struct serialsim_intf *intf = idr_find(&serialsim_echo_nums, id);
+
+	if (intf)
+		serialsim_free_intf(intf);
+
+	return 0;
+}
+
+static int serialsim_echo_release(struct inode *ino, struct file *file)
+{
+	struct serialsim_dyninfo *di = file->private_data;
+
+	mutex_lock(&serialsim_num_mutex);
+	idr_for_each(&di->nums, serialsim_echo_dyn_release, NULL);
+	mutex_unlock(&serialsim_num_mutex);
+	idr_destroy(&di->nums);
+	kfree(di);
+	return 0;
+}
+
+static int serialsim_echo_open(struct inode *ino, struct file *file)
+{
+	struct serialsim_dyninfo *di = kzalloc(sizeof(*di), GFP_KERNEL);
+
+	if (!di)
+		return -ENOMEM;
+
+	idr_init(&di->nums);
+
+	file->private_data = di;
+	return 0;
+}
+
+const struct file_operations serialsim_echo_misc_fops = {
+        .owner = THIS_MODULE,
+        .unlocked_ioctl = serialsim_echo_ioctl,
+        .open = serialsim_echo_open,
+        .release = serialsim_echo_release
+};
+
+static struct miscdevice serialsim_echo_misc = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "ttyEcho",
+	.fops = &serialsim_echo_misc_fops,
+	.mode = 0660
+};
+
+static long serialsim_pipe_ioctl(struct file *file,
+				 unsigned int cmd, unsigned long data)
+{
+	int rv = -ENOTTY;
+	struct serialsim_dyninfo *di = file->private_data;
+	struct serialsim_intf *intfa, *intfb;
+
+	mutex_lock(&serialsim_num_mutex);
+	switch (cmd) {
+	case SERIALSIM_ALLOC_ID:
+		rv = serialsim_alloc_intf(&serialsim_pipe_nums, -1, "pipea",
+					  &serialpipea_ops, nr_pipe_ports,
+					  nr_pipe_ports + nr_dyn_pipe_ports,
+					  &intfa);
+		if (rv)
+			break;
+		rv = serialsim_alloc_intf(NULL, -1, "pipeb",
+					  &serialpipeb_ops,
+					  intfa->port.line, 0,
+					  &intfb);
+		if (rv) {
+			serialsim_free_intf(intfa);
+			break;
+		}
+		rv = idr_alloc(&di->nums, intfa,
+			       intfa->port.line, intfa->port.line + 1,
+			       GFP_KERNEL);
+		if (rv < 0) {
+			serialsim_free_intf(intfb);
+			serialsim_free_intf(intfa);
+			break;
+		}
+		intfa->ointf = intfb;
+		intfb->ointf = intfa;
+
+		intfa->port.rs485_config = serialsim_rs485;
+		intfb->port.rs485_config = serialsim_rs485;
+#ifdef HAS_RS485_SUPPORTED
+		intfa->port.rs485_supported = serialsim_rs485_supported;
+		intfb->port.rs485_supported = serialsim_rs485_supported;
+#endif
+
+		rv = serialsim_add_port(-1, "pipea", &serialpipea_driver,
+					intfa);
+		if (rv) {
+			idr_remove(&di->nums, intfa->port.line);
+			serialsim_free_intf(intfb);
+			serialsim_free_intf(intfa);
+			break;
+		}
+
+		rv = serialsim_add_port(-1, "pipeb", &serialpipeb_driver,
+					intfb);
+		if (rv) {
+			idr_remove(&di->nums, intfa->port.line);
+			serialsim_free_intf(intfb);
+			serialsim_free_intf(intfa);
+			break;
+		} else {
+			rv = intfa->port.line;
+		}
+
+		serialsim_set_null_modem(intfa, true);
+		serialsim_set_null_modem(intfb, true);
+		break;
+
+	case SERIALSIM_FREE_ID:
+		struct serialsim_intf *intf = idr_remove(&di->nums, data);
+
+		rv = 0;
+		if (intf) {
+			serialsim_free_intf(intf->ointf);
+			serialsim_free_intf(intf);
+		} else {
+			rv = -ENOENT;
+		}
+		break;
+
+	default:
+		break;
+	}
+	mutex_unlock(&serialsim_num_mutex);
+
+	return rv;
+}
+
+static int serialsim_pipe_dyn_release(int id, void *p, void *data)
+{
+	struct serialsim_intf *intf = idr_find(&serialsim_pipe_nums, id);
+
+	if (intf) {
+		serialsim_free_intf(intf->ointf);
+		serialsim_free_intf(intf);
+	}
+
+	return 0;
+}
+
+static int serialsim_pipe_release(struct inode *ino, struct file *file)
+{
+	struct serialsim_dyninfo *di = file->private_data;
+
+	mutex_lock(&serialsim_num_mutex);
+	idr_for_each(&di->nums, serialsim_pipe_dyn_release, NULL);
+	mutex_unlock(&serialsim_num_mutex);
+	idr_destroy(&di->nums);
+	kfree(di);
+	return 0;
+}
+
+static int serialsim_pipe_open(struct inode *ino, struct file *file)
+{
+	struct serialsim_dyninfo *di = kzalloc(sizeof(*di), GFP_KERNEL);
+
+	if (!di)
+		return -ENOMEM;
+
+	idr_init(&di->nums);
+
+	file->private_data = di;
+	return 0;
+}
+
+const struct file_operations serialsim_pipe_misc_fops = {
+        .owner = THIS_MODULE,
+        .unlocked_ioctl = serialsim_pipe_ioctl,
+        .open = serialsim_pipe_open,
+        .release = serialsim_pipe_release
+};
+
+static struct miscdevice serialsim_pipe_misc = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "ttyPipe",
+	.fops = &serialsim_pipe_misc_fops,
+	.mode = 0660
+};
 
 static int __init serialsim_init(void)
 {
@@ -1112,32 +1359,37 @@ static int __init serialsim_init(void)
 	for (i = 0; i < nr_echo_ports; i++) {
 		struct serialsim_intf *intf;
 
-		intf = serialsim_alloc_intf(&serialsim_echo_nums, i, "echo",
-					    &serialecho_ops, 0, nr_echo_ports);
-		if (!intf)
+		rv = serialsim_alloc_intf(&serialsim_echo_nums, i, "echo",
+					  &serialecho_ops, 0, nr_echo_ports,
+					  &intf);
+		if (rv)
 			break;
 		intf->ointf = intf;
 		intf->do_null_modem = true;
 
 		rv = serialsim_add_port(i, "echo", &serialecho_driver, intf);
-		if (rv)
+		if (rv) {
+			serialsim_free_intf(intf);
 			break;
+		}
 	}
 
 	for (i = 0; !rv && i < nr_pipe_ports; i++) {
 		struct serialsim_intf *intfa;
 		struct serialsim_intf *intfb;
 
-		intfa = serialsim_alloc_intf(&serialsim_pipe_nums, i, "pipea",
-					     &serialpipea_ops,
-					     0, nr_pipe_ports);
-		if (!intfa)
+		rv = serialsim_alloc_intf(&serialsim_pipe_nums, i, "pipea",
+					  &serialpipea_ops,
+					  0, nr_pipe_ports, &intfa);
+		if (rv)
 			break;
-		intfb = serialsim_alloc_intf(NULL, i, "pipeb",
-					     &serialpipeb_ops,
-					     intfa->port.line, 0);
-		if (!intfb)
+		rv = serialsim_alloc_intf(NULL, i, "pipeb",
+					  &serialpipeb_ops,
+					  intfa->port.line, 0, &intfb);
+		if (rv) {
+			serialsim_free_intf(intfa);
 			break;
+		}
 		intfa->ointf = intfb;
 		intfb->ointf = intfa;
 
@@ -1156,11 +1408,15 @@ static int __init serialsim_init(void)
 		 */
 
 		rv = serialsim_add_port(i, "pipea", &serialpipea_driver, intfa);
-		if (rv)
+		if (rv) {
+			serialsim_free_intf(intfb);
+			serialsim_free_intf(intfa);
 			break;
+		}
 
 		rv = serialsim_add_port(i, "pipeb", &serialpipeb_driver, intfb);
 		if (rv) {
+			serialsim_free_intf(intfb);
 			serialsim_free_intf(intfa);
 			break;
 		}
@@ -1168,6 +1424,19 @@ static int __init serialsim_init(void)
 		serialsim_set_null_modem(intfa, true);
 		serialsim_set_null_modem(intfb, true);
 	}
+
+	rv = misc_register(&serialsim_echo_misc);
+	if (rv) {
+		pr_err("serialsim: Error registering dynamic echo device: %d\n",
+		       rv);
+	}
+
+	rv = misc_register(&serialsim_pipe_misc);
+	if (rv) {
+		pr_err("serialsim: Error registering dynamic pipe device: %d\n",
+		       rv);
+	}
+
 	return 0;
 
 out_unreg_pipea:
@@ -1190,6 +1459,8 @@ static int serialsim_clear_intf(int id, void *p, void *dummy)
 
 static void __exit serialsim_exit(void)
 {
+	misc_deregister(&serialsim_pipe_misc);
+	misc_deregister(&serialsim_echo_misc);
 	idr_for_each(&serialsim_echo_nums, serialsim_clear_intf, NULL);
 	idr_for_each(&serialsim_pipe_nums, serialsim_clear_intf, NULL);
 	uart_unregister_driver(&serialecho_driver);
