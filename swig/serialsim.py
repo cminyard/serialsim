@@ -157,11 +157,11 @@ def get_remote_null_modem(fd):
     assert fcntl.ioctl(fd, TIOCSERGREMNULLMODEM, val) == 0
     return val.value
 
-def serialsim_alloc_id(fd):
+def alloc_id(fd):
     rv = fcntl.ioctl(fd, SERIALSIM_ALLOC_ID, 0)
     assert rv >= 0
     return rv
 
-def serialsim_free_id(fd, val):
-    assert fcntl.ioctl(fd, SERIALSIM_FREE_ID, fd)
+def free_id(fd, val):
+    assert fcntl.ioctl(fd, SERIALSIM_FREE_ID, fd) == 0
     

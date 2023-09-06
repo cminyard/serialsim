@@ -75,8 +75,28 @@ devices will appear as /dev/ttyPipeA<n> and /dev/ttyPipeB<n>.  And
 data written to PipeA reads from PipeB, and vice-versa.
 
 You may create an arbitrary number of devices by setting the
-nr_echo ports and nr_pipe_ports module parameters.  The default is
+nr_echo_ports and nr_pipe_ports module parameters.  The default is
 four for both.
+
+You may also dynamically create devices for your use.  If you open
+/dev/ttyEcho, you can use the SERIALSIM_ALLOC_ID ioctl to create a new
+echo device.  It will return the echo device number N (/dev/ttyEchoN)
+that you can then open.  Note that it may take a little time for udev
+to create the device file.  If you use the SERIALSIM_FREE_ID ioctl and
+pass in the echo device number N, it will free the device.  Also, if
+you close the /dev/ttyEcho file, it will free all devices you have
+allocated with that file.
+
+There is also a /dev/ttyPipe device that is similar to /dev/ttyEcho,
+but creates pipe devices.
+
+By default you can create up to 16 dynamic devices of each type.  You
+may change these numbers with the nr_dyn_echo_ports and
+nr_dyn_pipe_ports module parameters.
+
+Dynamic devices are useful if you want to allocate a serial port or
+serial port pair for testing but don't really care what number it is.
+That makes it easier to do parallel testing.
 
 This driver supports modifying the modem control lines and
 injecting various serial errors.  It also supports a simulated null
@@ -253,4 +273,23 @@ for the remote serial port::
    set_remote_null_modem(fd, bool_val)
    bool_val = get_remote_null_modem(fd);
 
+There is also the::
 
+   alloc_id()
+   free_id()
+
+functions to allocate and free dynamic devices.  For instance, to create
+a dynamic pipe, do something like::
+
+   import serialsim
+   p = open("/dev/ttyPipe", "w")
+   id = serialsim.alloc_id(p.fileno())
+   pipea = "/dev/ttyPipeA%d" % id
+   pipeb = "/dev/ttyPipeB%d" % id
+
+   # Use pipea and pipeb here
+
+   # Not strictly necessary, the close will do this, too.
+   serialsim.free_id(p.fileno())
+
+   p.close()
