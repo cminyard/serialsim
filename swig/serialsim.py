@@ -167,11 +167,21 @@ def free_id(fd, val):
 
 def wait_for_dev(dev):
     count = 0
-    while not os.path.exists(dev):
+    ready = False
+    while not ready:
         count += 1
         if count > 100:
+            if os.path.exists(dev):
+                raise Exception("New device %s could not be opened" % dev);
             raise Exception("New device %s did not appear" % dev);
-        time.sleep(.01)
+        try:
+            f = open(dev)
+            f.close()
+            ready = True
+        except:
+            pass
+        if not ready:
+            time.sleep(.01)
 
 p_echo = None
 
