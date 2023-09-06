@@ -25,6 +25,7 @@
 #include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/idr.h>
 
 #include <linux/serialsim.h>
 
@@ -81,6 +82,12 @@ static inline int kernel_termios_to_user_termios(struct termios2 __user *u,
 struct serialsim_intf {
 	struct uart_port port;
 
+	/* idr we are stored in, or NULL if not in an idr (pipeb). */
+	struct idr *idr;
+
+	/* The driver we are registered against, NULL if none. */
+	struct uart_driver *driver;
+
 	/*
 	 * This is my transmit buffer, my thread picks this up and
 	 * injects them into the other port's uart.
@@ -128,9 +135,6 @@ struct serialsim_intf {
 
 	/* I can receive characters. */
 	bool rx_enabled;
-
-	/* Is the port registered with the uart driver? */
-	bool registered;
 
 	/*
 	 * The serial echo port on the other side of this pipe (or points
@@ -760,18 +764,25 @@ static int serialpipe_ioctl(struct uart_port *port, unsigned int cmd,
 	return rv;
 }
 
-static struct serialsim_intf *serialecho_ports;
-static struct serialsim_intf *serialpipe_ports;
-
 static unsigned int nr_echo_ports = 4;
 module_param(nr_echo_ports, uint, 0444);
 MODULE_PARM_DESC(nr_echo_ports,
 		 "The number of echo ports to create.  Defaults to 4");
 
+static unsigned int nr_dyn_echo_ports = 16;
+module_param(nr_dyn_echo_ports, uint, 0444);
+MODULE_PARM_DESC(nr_dyn_echo_ports,
+		 "Max dynamic echo ports available.  Defaults to 16");
+
 static unsigned int nr_pipe_ports = 4;
 module_param(nr_pipe_ports, uint, 0444);
 MODULE_PARM_DESC(nr_pipe_ports,
 		 "The number of pipe ports to create.  Defaults to 4");
+
+static unsigned int nr_dyn_pipe_ports = 16;
+module_param(nr_dyn_pipe_ports, uint, 0444);
+MODULE_PARM_DESC(nr_dyn_pipe_ports,
+		 "Max dynamic pipe ports available.  Defaults to 16");
 
 static char *gettok(char **s)
 {
@@ -998,42 +1009,100 @@ static const struct serial_rs485 serialsim_rs485_supported = {
 };
 #endif
 
+static DEFINE_IDR(serialsim_echo_nums);
+static DEFINE_IDR(serialsim_pipe_nums);
+
+static struct serialsim_intf *serialsim_alloc_intf(struct idr *idr,
+						   unsigned int i,
+						   const char *name,
+						   const struct uart_ops *ops,
+						   int min_id, int max_id)
+{
+	struct serialsim_intf *intf;
+	struct uart_port *port;
+
+	intf = kzalloc(sizeof(*intf), GFP_KERNEL);
+	if (!intf) {
+		pr_err("serialsim: Unable to alloc %s port %u\n", name, i);
+		return NULL;
+	}
+
+	intf->buf.buf = intf->xmitbuf;
+	intf->threadname = "serialecho";
+	spin_lock_init(&intf->mctrl_lock);
+	tasklet_init(&intf->mctrl_tasklet, mctrl_tasklet, (long) intf);
+	/* Won't configure without some I/O or mem address set. */
+	port = &intf->port;
+	port->iobase = 1;
+	port->flags = UPF_BOOT_AUTOCONF | UPF_SOFT_FLOW;
+	spin_lock_init(&port->lock);
+	port->attr_group = &serialsim_dev_attr_group;
+	port->ops = ops;
+
+	if (idr) {
+		int id = idr_alloc(idr, intf, min_id, max_id, GFP_KERNEL);
+
+		if (id < 0) {
+			pr_err("serialsim: Unable to alloc id for %s %u: %d\n",
+			       name, i, id);
+			kfree(intf);
+			return NULL;
+		}
+		intf->idr = idr;
+		port->line = id;
+	} else {
+		port->line = min_id;
+	}
+
+	return intf;
+}
+
+static void serialsim_free_intf(struct serialsim_intf *intf)
+{
+	if (intf->driver)
+		uart_remove_one_port(intf->driver, &intf->port);
+	tasklet_kill(&intf->mctrl_tasklet);
+	if (intf->idr)
+		idr_remove(intf->idr, intf->port.line);
+	kfree(intf);
+}
+
+static int serialsim_add_port(int i, const char *name,
+			      struct uart_driver *driver,
+			      struct serialsim_intf *intf)
+{
+	int rv;
+
+	rv = uart_add_one_port(driver, &intf->port);
+	if (rv) {
+		pr_err("serialsim: Unable to add uart %s port %u: %d\n",
+		       name, i, rv);
+		return rv;
+	}
+	intf->driver = driver;
+	return 0;
+}
+
 static int __init serialsim_init(void)
 {
 	unsigned int i;
 	int rv;
 
-	serialecho_ports = kcalloc(nr_echo_ports,
-				   sizeof(*serialecho_ports),
-				   GFP_KERNEL);
-	if (!serialecho_ports) {
-		rv = -ENOMEM;
-		goto out;
-	}
-
-	serialpipe_ports = kcalloc(nr_pipe_ports * 2,
-				   sizeof(*serialpipe_ports),
-				   GFP_KERNEL);
-	if (!serialpipe_ports) {
-		rv = -ENOMEM;
-		goto out;
-	}
-
-	serialecho_driver.nr = nr_echo_ports;
+	serialecho_driver.nr = nr_echo_ports + nr_dyn_echo_ports;
 	rv = uart_register_driver(&serialecho_driver);
 	if (rv) {
 		pr_err("serialsim: Unable to register echo driver.\n");
 		goto out;
 	}
 
-	serialpipea_driver.nr = nr_pipe_ports;
+	serialpipea_driver.nr = nr_pipe_ports + nr_dyn_pipe_ports;
 	rv = uart_register_driver(&serialpipea_driver);
 	if (rv) {
 		pr_err("serialsim: Unable to register pipe a driver.\n");
 		goto out_unreg_echo;
 	}
 
-	serialpipeb_driver.nr = nr_pipe_ports;
+	serialpipeb_driver.nr = nr_pipe_ports + nr_dyn_pipe_ports;
 	rv = uart_register_driver(&serialpipeb_driver);
 	if (rv) {
 		pr_err("serialsim: Unable to register pipe b driver.\n");
@@ -1041,101 +1110,63 @@ static int __init serialsim_init(void)
 	}
 
 	for (i = 0; i < nr_echo_ports; i++) {
-		struct serialsim_intf *intf = &serialecho_ports[i];
-		struct uart_port *port = &intf->port;
+		struct serialsim_intf *intf;
 
-		intf->buf.buf = intf->xmitbuf;
+		intf = serialsim_alloc_intf(&serialsim_echo_nums, i, "echo",
+					    &serialecho_ops, 0, nr_echo_ports);
+		if (!intf)
+			break;
 		intf->ointf = intf;
-		intf->threadname = "serialecho";
 		intf->do_null_modem = true;
-		spin_lock_init(&intf->mctrl_lock);
-		tasklet_init(&intf->mctrl_tasklet, mctrl_tasklet, (long) intf);
-		/* Won't configure without some I/O or mem address set. */
-		port->iobase = 1;
-		port->line = i;
-		port->flags = UPF_BOOT_AUTOCONF | UPF_SOFT_FLOW;
-		port->ops = &serialecho_ops;
-		spin_lock_init(&port->lock);
-		port->attr_group = &serialsim_dev_attr_group;
-		rv = uart_add_one_port(&serialecho_driver, port);
+
+		rv = serialsim_add_port(i, "echo", &serialecho_driver, intf);
 		if (rv)
-			pr_err("serialsim: Unable to add uart port %d: %d\n",
-			       i, rv);
-		else
-			intf->registered = true;
+			break;
 	}
 
-	for (i = 0; i < nr_pipe_ports * 2; i += 2) {
-		struct serialsim_intf *intfa = &serialpipe_ports[i];
-		struct serialsim_intf *intfb = &serialpipe_ports[i + 1];
-		struct uart_port *porta = &intfa->port;
-		struct uart_port *portb = &intfb->port;
+	for (i = 0; !rv && i < nr_pipe_ports; i++) {
+		struct serialsim_intf *intfa;
+		struct serialsim_intf *intfb;
 
-		intfa->buf.buf = intfa->xmitbuf;
-		intfb->buf.buf = intfb->xmitbuf;
+		intfa = serialsim_alloc_intf(&serialsim_pipe_nums, i, "pipea",
+					     &serialpipea_ops,
+					     0, nr_pipe_ports);
+		if (!intfa)
+			break;
+		intfb = serialsim_alloc_intf(NULL, i, "pipeb",
+					     &serialpipeb_ops,
+					     intfa->port.line, 0);
+		if (!intfb)
+			break;
 		intfa->ointf = intfb;
 		intfb->ointf = intfa;
-		intfa->threadname = "serialpipea";
-		intfb->threadname = "serialpipeb";
-		spin_lock_init(&intfa->mctrl_lock);
-		spin_lock_init(&intfb->mctrl_lock);
-		tasklet_init(&intfa->mctrl_tasklet, mctrl_tasklet,
-			     (long) intfa);
-		tasklet_init(&intfb->mctrl_tasklet, mctrl_tasklet,
-			     (long) intfb);
 
-		/* Won't configure without some I/O or mem address set. */
-		porta->iobase = 1;
-		porta->line = i / 2;
-		porta->flags = UPF_BOOT_AUTOCONF | UPF_SOFT_FLOW;
-		porta->ops = &serialpipea_ops;
-		spin_lock_init(&porta->lock);
-		porta->attr_group = &serialsim_dev_attr_group;
-		porta->rs485_config = serialsim_rs485;
+		intfa->port.rs485_config = serialsim_rs485;
+		intfb->port.rs485_config = serialsim_rs485;
 #ifdef HAS_RS485_SUPPORTED
-		porta->rs485_supported = serialsim_rs485_supported;
+		intfa->port.rs485_supported = serialsim_rs485_supported;
+		intfb->port.rs485_supported = serialsim_rs485_supported;
 #endif
 
 		/*
 		 * uart_add_one_port() does an mctrl operation, which will
 		 * claim the other port's lock.  So everything needs to be
-		 * full initialized, and we need null modem off until we
+		 * fully initialized, and we need null modem off until we
 		 * get things added.
 		 */
-		portb->iobase = 1;
-		portb->line = i / 2;
-		portb->flags = UPF_BOOT_AUTOCONF | UPF_SOFT_FLOW;
-		portb->ops = &serialpipeb_ops;
-		portb->attr_group = &serialsim_dev_attr_group;
-		spin_lock_init(&portb->lock);
-		portb->rs485_config = serialsim_rs485;
-#ifdef HAS_RS485_SUPPORTED
-		portb->rs485_supported = serialsim_rs485_supported;
-#endif
 
-		rv = uart_add_one_port(&serialpipea_driver, porta);
+		rv = serialsim_add_port(i, "pipea", &serialpipea_driver, intfa);
+		if (rv)
+			break;
+
+		rv = serialsim_add_port(i, "pipeb", &serialpipeb_driver, intfb);
 		if (rv) {
-			pr_err("serialsim: Unable to add uart pipe a port %d: %d\n",
-			       i, rv);
-			continue;
-		} else {
-			intfa->registered = true;
+			serialsim_free_intf(intfa);
+			break;
 		}
 
-		rv = uart_add_one_port(&serialpipeb_driver, portb);
-		if (rv) {
-			pr_err("serialsim: Unable to add uart pipe b port %d: %d\n",
-			       i, rv);
-			intfa->registered = false;
-			uart_remove_one_port(&serialpipea_driver, porta);
-		} else {
-			intfb->registered = true;
-		}
-
-		if (intfa->registered && intfb->registered) {
-			serialsim_set_null_modem(intfa, true);
-			serialsim_set_null_modem(intfb, true);
-		}
+		serialsim_set_null_modem(intfa, true);
+		serialsim_set_null_modem(intfb, true);
 	}
 	return 0;
 
@@ -1144,45 +1175,26 @@ out_unreg_pipea:
 out_unreg_echo:
 	uart_unregister_driver(&serialecho_driver);
 out:
-	if (serialecho_ports)
-		kfree(serialecho_ports);
-	if (serialpipe_ports)
-		kfree(serialpipe_ports);
 	return rv;
+}
+
+static int serialsim_clear_intf(int id, void *p, void *dummy)
+{
+	struct serialsim_intf *intf = p;
+
+	if (intf->ointf != intf)
+		serialsim_free_intf(intf->ointf);
+	serialsim_free_intf(intf);
+	return 0;
 }
 
 static void __exit serialsim_exit(void)
 {
-	unsigned int i;
-
-	for (i = 0; i < nr_echo_ports; i++) {
-		struct serialsim_intf *intf = &serialecho_ports[i];
-		struct uart_port *port = &intf->port;
-
-		if (intf->registered)
-			uart_remove_one_port(&serialecho_driver, port);
-		tasklet_kill(&intf->mctrl_tasklet);
-	}
-
-	for (i = 0; i < nr_pipe_ports * 2; i += 2) {
-		struct serialsim_intf *intfa = &serialpipe_ports[i];
-		struct serialsim_intf *intfb = &serialpipe_ports[i + 1];
-		struct uart_port *porta = &intfa->port;
-		struct uart_port *portb = &intfb->port;
-
-		if (intfa->registered)
-			uart_remove_one_port(&serialpipea_driver, porta);
-		if (intfb->registered)
-			uart_remove_one_port(&serialpipeb_driver, portb);
-		tasklet_kill(&intfa->mctrl_tasklet);
-		tasklet_kill(&intfb->mctrl_tasklet);
-	}
+	idr_for_each(&serialsim_echo_nums, serialsim_clear_intf, NULL);
+	idr_for_each(&serialsim_pipe_nums, serialsim_clear_intf, NULL);
 	uart_unregister_driver(&serialecho_driver);
 	uart_unregister_driver(&serialpipea_driver);
 	uart_unregister_driver(&serialpipeb_driver);
-
-	kfree(serialecho_ports);
-	kfree(serialpipe_ports);
 
 	pr_info("serialsim unloaded\n");
 }
