@@ -27,6 +27,7 @@
 #include <linux/version.h>
 #include <linux/idr.h>
 #include <linux/miscdevice.h>
+#include <linux/platform_device.h>
 
 #include <linux/serialsim.h>
 
@@ -82,6 +83,9 @@ static inline int kernel_termios_to_user_termios(struct termios2 __user *u,
 
 struct serialsim_intf {
 	struct uart_port port;
+
+	/* We need a device for the interface, just use a platform device. */
+	struct platform_device pdev;
 
 	/* idr we are stored in, or NULL if not in an idr (pipeb). */
 	struct idr *idr;
@@ -1023,6 +1027,7 @@ static int serialsim_alloc_intf(struct idr *idr,
 {
 	struct serialsim_intf *intf;
 	struct uart_port *port;
+	int rv;
 
 	intf = kzalloc(sizeof(*intf), GFP_KERNEL);
 	if (!intf) {
@@ -1034,8 +1039,21 @@ static int serialsim_alloc_intf(struct idr *idr,
 	intf->threadname = "serialecho";
 	spin_lock_init(&intf->mctrl_lock);
 	tasklet_init(&intf->mctrl_tasklet, mctrl_tasklet, (long) intf);
-	/* Won't configure without some I/O or mem address set. */
+
+	intf->pdev.name = name;
+	intf->pdev.id = i;
+	rv = platform_device_register(&intf->pdev);
+	if (rv) {
+		platform_device_put(&intf->pdev);
+		pr_err("serialsim: Unable to register device for %s:%u: %d\n",
+		       name, i, rv);
+		return rv;
+	}
+
 	port = &intf->port;
+	port->dev = &intf->pdev.dev;
+	/* Won't configure without some I/O or mem address set. */
+	port->type = UPIO_PORT;
 	port->iobase = 1;
 	port->flags = UPF_BOOT_AUTOCONF | UPF_SOFT_FLOW;
 	spin_lock_init(&port->lock);
@@ -1101,7 +1119,7 @@ static long serialsim_echo_ioctl(struct file *file,
 	mutex_lock(&serialsim_num_mutex);
 	switch (cmd) {
 	case SERIALSIM_ALLOC_ID:
-		rv = serialsim_alloc_intf(&serialsim_echo_nums, -1, "echo",
+		rv = serialsim_alloc_intf(&serialsim_echo_nums, -1, "ttyEcho",
 					  &serialecho_ops, nr_echo_ports,
 					  nr_echo_ports + nr_dyn_echo_ports,
 					  &intf);
@@ -1203,13 +1221,13 @@ static long serialsim_pipe_ioctl(struct file *file,
 	mutex_lock(&serialsim_num_mutex);
 	switch (cmd) {
 	case SERIALSIM_ALLOC_ID:
-		rv = serialsim_alloc_intf(&serialsim_pipe_nums, -1, "pipea",
+		rv = serialsim_alloc_intf(&serialsim_pipe_nums, -1, "ttyPipeA",
 					  &serialpipea_ops, nr_pipe_ports,
 					  nr_pipe_ports + nr_dyn_pipe_ports,
 					  &intfa);
 		if (rv)
 			break;
-		rv = serialsim_alloc_intf(NULL, -1, "pipeb",
+		rv = serialsim_alloc_intf(NULL, -1, "ttyPipeB",
 					  &serialpipeb_ops,
 					  intfa->port.line, 0,
 					  &intfb);
@@ -1359,7 +1377,7 @@ static int __init serialsim_init(void)
 	for (i = 0; i < nr_echo_ports; i++) {
 		struct serialsim_intf *intf;
 
-		rv = serialsim_alloc_intf(&serialsim_echo_nums, i, "echo",
+		rv = serialsim_alloc_intf(&serialsim_echo_nums, i, "ttyEcho",
 					  &serialecho_ops, 0, nr_echo_ports,
 					  &intf);
 		if (rv)
@@ -1378,12 +1396,12 @@ static int __init serialsim_init(void)
 		struct serialsim_intf *intfa;
 		struct serialsim_intf *intfb;
 
-		rv = serialsim_alloc_intf(&serialsim_pipe_nums, i, "pipea",
+		rv = serialsim_alloc_intf(&serialsim_pipe_nums, i, "ttyPipeA",
 					  &serialpipea_ops,
 					  0, nr_pipe_ports, &intfa);
 		if (rv)
 			break;
-		rv = serialsim_alloc_intf(NULL, i, "pipeb",
+		rv = serialsim_alloc_intf(NULL, i, "ttyPipeB",
 					  &serialpipeb_ops,
 					  intfa->port.line, 0, &intfb);
 		if (rv) {
