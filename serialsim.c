@@ -35,7 +35,7 @@
 #error "This module is only supported with TCGETS2"
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,1,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,1,0) || RHEL_MAJOR >= 9
 /* This went away in 6.1. */
 static inline int kernel_termios_to_user_termios(struct termios2 __user *u,
                                                  struct ktermios *k)
@@ -49,7 +49,7 @@ static inline int kernel_termios_to_user_termios(struct termios2 __user *u,
 #define CONST_KTERMIOS
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,0,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,0,0) || RHEL_MAJOR >= 9
 /* New in 6.0. */
 #define RS485_HAS_TERMIOS struct ktermios *termios,
 
