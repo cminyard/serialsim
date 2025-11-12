@@ -28,11 +28,12 @@
 #include <linux/idr.h>
 #include <linux/miscdevice.h>
 #include <linux/platform_device.h>
-#include <linux/circ_buf.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,11,0)
 #define USE_KFIFO_BUF
 #include <linux/kfifo.h>
+#else
+#include <linux/circ_buf.h>
 #endif
 
 #include <linux/serialsim.h>
