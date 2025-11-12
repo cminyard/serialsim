@@ -107,7 +107,7 @@ struct serialsim_intf {
 #ifndef USE_KFIFO_BUF
 	struct circ_buf buf;
 #else
-	DECLARE_KFIFO_PTR(buf, unsigned char);
+	struct kfifo buf;
 #endif
 
 	/* Error flags to send. */
@@ -1107,14 +1107,7 @@ static int serialsim_alloc_intf(struct idr *idr,
 #ifndef USE_KFIFO_BUF
 	intf->buf.buf = intf->xmitbuf;
 #else
-	if (kfifo_init(&intf->buf, intf->xmitbuf, SERIALSIM_XBUFSIZE)) {
-		pr_err("serialsim: Unable to init kfifo for %s:%u\n",
-		       name, port->line);
-		if (intf->idr)
-			idr_remove(intf->idr, intf->port.line);
-		kfree(intf);
-		return -ENOMEM;
-	}
+	kfifo_init(&intf->buf, intf->xmitbuf, SERIALSIM_XBUFSIZE);
 #endif
 	intf->threadname = "serialecho";
 	spin_lock_init(&intf->mctrl_lock);
