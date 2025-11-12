@@ -505,7 +505,7 @@ static int serialsim_thread(void *data)
 #else
 			unsigned char c;
 
-			while (uart_fifo_get(oport, &c) && circ_sbuf_space(&intf->buf)) {
+			while (circ_sbuf_space(&intf->buf) && uart_fifo_get(oport, &c)) {
 				kfifo_put(&intf->buf, c);
 			}
 			if (!uart_tx_stopped(oport))
