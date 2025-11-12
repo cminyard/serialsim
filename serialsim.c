@@ -504,10 +504,9 @@ static int serialsim_thread(void *data)
 			serialsim_transfer_data(oport, &intf->buf);
 #else
 			unsigned char c;
-			
+
 			while (uart_fifo_get(oport, &c) && circ_sbuf_space(&intf->buf)) {
 				kfifo_put(&intf->buf, c);
-				oport->icount.tx++;
 			}
 			if (!uart_tx_stopped(oport))
 				uart_write_wakeup(oport);
