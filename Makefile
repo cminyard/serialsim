@@ -11,7 +11,9 @@ all:
 
 # Do our own clean, otherwise swig/serialsim.i gets removed
 clean:
-	rm -f *.o* *.ko *.mod*
+	rm -f  *.o*  *.ko*  *.mod*
+	rm -f .*.o* .*.ko* .*.mod*
+	rm -f *.symvers* .*.symvers*
 
 private_key.der: openssl.conf
 	openssl req -x509 -new -nodes -utf8 -sha256 -days 36500  \
