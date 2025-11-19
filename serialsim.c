@@ -29,6 +29,13 @@
 #include <linux/miscdevice.h>
 #include <linux/platform_device.h>
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,10,0)
+#define USE_KFIFO_BUF
+#include <linux/kfifo.h>
+#else
+#include <linux/circ_buf.h>
+#endif
+
 #include <linux/serialsim.h>
 
 #ifndef TCGETS2
@@ -98,7 +105,11 @@ struct serialsim_intf {
 	 * injects them into the other port's uart.
 	 */
 	unsigned char xmitbuf[SERIALSIM_XBUFSIZE];
+#ifndef USE_KFIFO_BUF
 	struct circ_buf buf;
+#else
+	struct kfifo buf;
+#endif
 
 	/* Error flags to send. */
 	bool break_reported;
@@ -159,10 +170,15 @@ struct serialsim_intf {
 	struct serial_rs485 rs485;
 };
 
+#ifndef USE_KFIFO_BUF
 #define circ_sbuf_space(buf) CIRC_SPACE((buf)->head, (buf)->tail, \
 					SERIALSIM_XBUFSIZE)
 #define circ_sbuf_empty(buf) ((buf)->head == (buf)->tail)
 #define circ_sbuf_next(idx) (((idx) + 1) % SERIALSIM_XBUFSIZE)
+#else
+#define circ_sbuf_space(buf) kfifo_avail(buf)
+#define circ_sbuf_empty(buf) kfifo_is_empty(buf)
+#endif
 
 static struct serialsim_intf *serialsim_port_to_intf(struct uart_port *port)
 {
@@ -386,6 +402,7 @@ static void serialsim_set_baud_rate(struct serialsim_intf *intf,
 	intf->per_interval_residual = baud % intf->div;
 }
 
+#ifndef USE_KFIFO_BUF
 static void serialsim_transfer_data(struct uart_port *port,
 				    struct circ_buf *tbuf)
 {
@@ -402,6 +419,7 @@ static void serialsim_transfer_data(struct uart_port *port,
 	if (uart_circ_chars_pending(cbuf) < WAKEUP_CHARS)
 		uart_write_wakeup(port);
 }
+#endif
 
 static unsigned int serialsim_get_flag(struct serialsim_intf *intf,
 				       unsigned int *status)
@@ -458,7 +476,6 @@ static int serialsim_thread(void *data)
 	struct serialsim_intf *ointf = intf->ointf;
 	struct uart_port *port = &intf->port;
 	struct uart_port *oport = &ointf->port;
-	struct circ_buf *tbuf = &intf->buf;
 	unsigned int residual = 0;
 
 	while (!kthread_should_stop()) {
@@ -474,12 +491,27 @@ static int serialsim_thread(void *data)
 		spin_unlock_irq(&intf->mctrl_lock);
 
 		spin_lock_irq(&oport->lock);
-		if (ointf->tx_enabled && oport->state->xmit.buf)
+		if (ointf->tx_enabled
+#ifndef USE_KFIFO_BUF
+		    && oport->state->xmit.buf
+#endif
+		) {
 			/*
 			 * Move bytes from the other port's transmit buffer to
 			 * the interface buffer.
 			 */
-			serialsim_transfer_data(oport, tbuf);
+#ifndef USE_KFIFO_BUF
+			serialsim_transfer_data(oport, &intf->buf);
+#else
+			unsigned char c;
+
+			while (circ_sbuf_space(&intf->buf) && uart_fifo_get(oport, &c)) {
+				kfifo_put(&intf->buf, c);
+			}
+			if (!uart_tx_stopped(oport))
+				uart_write_wakeup(oport);
+#endif
+		}
 		spin_unlock_irq(&oport->lock);
 
 		/*
@@ -510,17 +542,32 @@ static int serialsim_thread(void *data)
 					goto skip_send;
 				}
 			}
-			for (i = 0; i < to_send && !circ_sbuf_empty(tbuf);
+#ifndef USE_KFIFO_BUF
+			for (i = 0; i < to_send && !circ_sbuf_empty(&intf->buf);
 			     i++) {
-				unsigned char c = tbuf->buf[tbuf->tail];
+				unsigned char c = intf->buf.buf[intf->buf.tail];
 
-				tbuf->tail = circ_sbuf_next(tbuf->tail);
+				intf->buf.tail = circ_sbuf_next(intf->buf.tail);
 				flag = serialsim_get_flag(intf, &status);
 				port->icount.rx++;
 				uart_insert_char(port, status,
 						 DO_OVERRUN_ERR,
 						 c, flag);
 			}
+#else
+			for (i = 0; i < to_send && !circ_sbuf_empty(&intf->buf);
+			     i++) {
+				unsigned char c;
+
+				if (!kfifo_get(&intf->buf, &c))
+					break;
+				flag = serialsim_get_flag(intf, &status);
+				port->icount.rx++;
+				uart_insert_char(port, status,
+						 DO_OVERRUN_ERR,
+						 c, flag);
+			}
+#endif
 		}
 	skip_send:
 		spin_unlock_irq(&port->lock);
@@ -581,7 +628,6 @@ static int serialsim_startup(struct uart_port *port)
 {
 	struct serialsim_intf *intf = serialsim_port_to_intf(port);
 	int rv = 0;
-	struct circ_buf *cbuf = &port->state->xmit;
 	unsigned long flags;
 
 	/*
@@ -589,10 +635,18 @@ static int serialsim_startup(struct uart_port *port)
 	 * can get stale data.
 	 */
 	spin_lock_irqsave(&port->lock, flags);
-	cbuf->head = cbuf->tail = 0;
+#ifndef USE_KFIFO_BUF
+	{
+		struct circ_buf *cbuf = &port->state->xmit;
+		cbuf->head = cbuf->tail = 0;
+	}
+	intf->buf.head = intf->buf.tail = 0;
+#else
+	/* In 6.11+, the xmit buffer is a kfifo managed by the core */
+	kfifo_reset(&intf->buf);
+#endif
 	spin_unlock_irqrestore(&port->lock, flags);
 
-	intf->buf.head = intf->buf.tail = 0;
 	intf->thread = kthread_run(serialsim_thread, intf,
 				   "%s%d", intf->threadname, port->line);
 	if (IS_ERR(intf->thread)) {
@@ -1050,7 +1104,11 @@ static int serialsim_alloc_intf(struct idr *idr,
 		port->line = min_id;
 	}
 
+#ifndef USE_KFIFO_BUF
 	intf->buf.buf = intf->xmitbuf;
+#else
+	kfifo_init(&intf->buf, intf->xmitbuf, SERIALSIM_XBUFSIZE);
+#endif
 	intf->threadname = "serialecho";
 	spin_lock_init(&intf->mctrl_lock);
 	tasklet_init(&intf->mctrl_tasklet, mctrl_tasklet, (long) intf);
