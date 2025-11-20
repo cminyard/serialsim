@@ -29,7 +29,7 @@
 #include <linux/miscdevice.h>
 #include <linux/platform_device.h>
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,11,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,10,0)
 #define USE_KFIFO_BUF
 #include <linux/kfifo.h>
 #else
